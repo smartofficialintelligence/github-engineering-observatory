@@ -6,12 +6,14 @@ engagement, sustainability, and network structure — built on
 [GH Archive](https://www.gharchive.org/) hourly event files, with
 Bronze/Silver/Gold modeling and MLflow-managed forecasting.
 
-**Status:** schema validation complete (spec Tasks 1–3); Bronze ingestion
-(spec §21 step 5) implemented and verified in-workspace 2026-07-30 —
-notebooks 01/02 ran green on serverless; `bronze.events_raw` holds all
-499,742 sampled events (0 duplicates, 0 quarantined, exactly one
-`public=false` ForkEvent per Finding S6) and `bronze.schema_profile` holds
-the 1,513 profile rows. Next: Silver normalization (spec §21 step 6).
+**Status:** Bronze **and Silver** built and verified in-workspace
+2026-07-30 (spec §21 steps 1–6) — notebooks 01/02/03 ran green on
+serverless. `bronze.events_raw` and `silver.events` both hold all 499,742
+sampled events (Silver flags rather than drops: exactly one `non_public`
+row, Finding S6); lifecycle tables `pr_events`/`issue_events`/
+`review_events`/`release_events` reconcile with the validation report
+(821/503/124/35 rows, PR action and review-state distributions exact).
+Next: Gold production metrics (spec §21 step 7).
 The empirical findings materially change the downstream
 design — read
 [`docs/schema_validation_report.md`](docs/schema_validation_report.md) before
@@ -119,8 +121,9 @@ counts against the schema profile. If workspace egress to
 4. ~~Schema validation report~~
 5. ~~Bronze ingestion (`events_raw`, quarantine, audit)~~ — verified
    in-workspace 2026-07-30
-6. Silver normalization and lifecycle tables ← next
-7. Gold production metrics; velocity/acceleration
+6. ~~Silver normalization and lifecycle tables~~ — verified in-workspace
+   2026-07-30
+7. Gold production metrics; velocity/acceleration ← next
 8. Flow, contribution, engagement metrics; data-quality monitoring
 9. Seasonal-naive forecast + statistical baselines, MLflow tracking
 10. Retraining workflow, sustainability and network metrics

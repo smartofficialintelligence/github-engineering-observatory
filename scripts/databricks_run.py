@@ -135,7 +135,25 @@ def _find_repo(user: str) -> dict | None:
     for repo in resp.get("repos", []):
         if repo.get("path", "").rstrip("/").endswith("/" + REPO_NAME):
             return repo
-    return None
+    # Git folders in newer workspaces don't appear in the repos list and
+    # get-status reports them as DIRECTORY — but the object_id works as
+    # the repo id for GET/PATCH /api/2.0/repos/{id}.
+    path = f"{prefix}/{REPO_NAME}"
+    try:
+        status = api("GET", "/api/2.0/workspace/get-status", query={"path": path})
+    except ApiError as exc:
+        if exc.status == 404:
+            return None
+        raise
+    object_id = status.get("object_id")
+    if object_id is None:
+        return None
+    try:
+        return api("GET", f"/api/2.0/repos/{object_id}")
+    except ApiError as exc:
+        if exc.status in (400, 404):  # exists but is not a Git folder
+            sys.exit(f"{path} exists but is not a Git folder — remove or rename it")
+        raise
 
 
 def cmd_sync_repo(args: argparse.Namespace) -> int:
