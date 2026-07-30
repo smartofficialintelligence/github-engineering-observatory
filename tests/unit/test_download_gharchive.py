@@ -247,3 +247,36 @@ def test_download_hours_appends_jsonl_audit(tmp_path, monkeypatch):
     assert rec["source_url"].endswith("2026-07-29-15.json.gz")
     assert rec["run_id"] == results[0].run_id
     assert rec["source_hour"] == "2026-07-29T15:00:00+00:00"
+
+
+def test_append_audit_falls_back_to_per_run_file_on_illegal_seek(tmp_path, monkeypatch):
+    """UC Volume FUSE rejects appending to non-empty files (errno 29);
+    records must land in a per-run file instead of being lost."""
+    result = dg.DownloadResult(
+        run_id="runx", source_url="u", source_file="f.json.gz",
+        source_hour="2026-07-27T00:00:00+00:00", download_started_at="t",
+    )
+    real_open = open
+
+    def fuse_like_open(path, mode="r", **kwargs):
+        if "a" in mode:
+            raise OSError(29, "Illegal seek")
+        return real_open(path, mode, **kwargs)
+
+    monkeypatch.setattr("builtins.open", fuse_like_open)
+    path = dg.append_audit([result], str(tmp_path))
+    assert path.endswith("_download_audit.runx.jsonl")
+    with real_open(path) as fh:
+        assert json.loads(fh.read())["run_id"] == "runx"
+
+
+def test_append_audit_normal_append_still_works(tmp_path):
+    result = dg.DownloadResult(
+        run_id="r1", source_url="u", source_file="f.json.gz",
+        source_hour="2026-07-27T00:00:00+00:00", download_started_at="t",
+    )
+    path = dg.append_audit([result], str(tmp_path))
+    path2 = dg.append_audit([result], str(tmp_path))
+    assert path == path2  # append works -> same canonical file
+    with open(path) as fh:
+        assert len(fh.readlines()) == 2

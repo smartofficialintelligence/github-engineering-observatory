@@ -330,12 +330,33 @@ def _attempt_download(
 
 
 def append_audit(results: Iterable[DownloadResult], dest_dir: str) -> str:
-    """Append audit records as JSONL next to the data files."""
+    """Write audit records as JSONL next to the data files.
+
+    Appends to ``_download_audit.jsonl`` where the filesystem allows it.
+    Unity Catalog Volume FUSE mounts reject appending to a non-empty
+    file (``OSError: Illegal seek`` — append must seek to end), so on
+    that error the records go to a fresh per-run file instead
+    (``_download_audit.<run_id>.jsonl``, sequential write only).
+    Consumers must glob ``_download_audit*.jsonl``.
+    """
+    results = list(results)
     audit_path = os.path.join(dest_dir, AUDIT_FILENAME)
-    with open(audit_path, "a", encoding="utf-8") as fh:
+    try:
+        with open(audit_path, "a", encoding="utf-8") as fh:
+            for result in results:
+                fh.write(result.to_json() + "\n")
+        return audit_path
+    except OSError as exc:
+        if exc.errno != 29:  # ESPIPE: illegal seek (FUSE append limitation)
+            raise
+    run_id = results[0].run_id if results else uuid.uuid4().hex
+    stem, ext = os.path.splitext(AUDIT_FILENAME)
+    per_run_path = os.path.join(dest_dir, f"{stem}.{run_id}{ext}")
+    with open(per_run_path, "w", encoding="utf-8") as fh:
         for result in results:
             fh.write(result.to_json() + "\n")
-    return audit_path
+    logger.info("audit append unsupported on %s; wrote %s", audit_path, per_run_path)
+    return per_run_path
 
 
 def download_hours(

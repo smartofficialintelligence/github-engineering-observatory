@@ -102,14 +102,18 @@ from github_observatory.ingestion.bronze_ingest import (
     write_audit_rows,
 )
 
-audit_jsonl = os.path.join(RAW_VOLUME_PATH, "_download_audit.jsonl")
-if os.path.exists(audit_jsonl):
+import glob
+
+audit_files = sorted(glob.glob(os.path.join(RAW_VOLUME_PATH, "_download_audit*.jsonl")))
+download_rows = []
+for audit_jsonl in audit_files:
     with open(audit_jsonl, encoding="utf-8") as fh:
-        download_rows = [download_result_audit_row(json.loads(line)) for line in fh if line.strip()]
+        download_rows += [download_result_audit_row(json.loads(line)) for line in fh if line.strip()]
+if download_rows:
     write_audit_rows(spark, download_rows)
-    print(f"loaded {len(download_rows)} download audit records")
+    print(f"loaded {len(download_rows)} download audit records from {len(audit_files)} file(s)")
 else:
-    print("no _download_audit.jsonl found — skipping download-phase audit load")
+    print("no _download_audit*.jsonl found — skipping download-phase audit load")
 
 # COMMAND ----------
 
