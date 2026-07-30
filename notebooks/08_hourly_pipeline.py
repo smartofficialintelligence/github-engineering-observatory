@@ -120,6 +120,10 @@ create_forecast_tables(spark)
 
 import mlflow
 
+# Serverless Spark Connect does not expose spark.mlflow.* confs; set the
+# URIs explicitly so mlflow never falls back to reading them.
+mlflow.set_tracking_uri("databricks")
+mlflow.set_registry_uri("databricks-uc")
 mlflow.set_experiment("/Shared/github-observatory-forecast")
 for target in ("total_events", "push_events"):
     series = read_hourly_series(spark, GOLD_ECOSYSTEM_HOURLY_TABLE, target)

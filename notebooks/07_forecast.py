@@ -60,6 +60,10 @@ for target in TARGETS:
 # DBTITLE 1,Log to MLflow
 import mlflow
 
+# Serverless Spark Connect does not expose spark.mlflow.* confs; set the
+# URIs explicitly so mlflow never falls back to reading them.
+mlflow.set_tracking_uri("databricks")
+mlflow.set_registry_uri("databricks-uc")
 mlflow.set_experiment("/Shared/github-observatory-forecast")
 for target, (series, evals) in all_evals.items():
     for e in evals:
