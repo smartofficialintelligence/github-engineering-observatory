@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "github-observatory"
+version = "0.1.0"
+description = "GitHub Engineering Observatory: lakehouse measurement and forecasting over GH Archive events"
+readme = "README.md"
+requires-python = ">=3.10"
+# Core modules are stdlib-only so they run unchanged on Databricks
+# serverless and locally. Spark/Delta APIs are imported lazily inside
+# functions that need them (available natively on Databricks).
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Data files — raw GH Archive hours never belong in git
+*.json.gz
+raw_files/
+_download_audit.jsonl
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
