@@ -6,8 +6,11 @@ engagement, sustainability, and network structure — built on
 [GH Archive](https://www.gharchive.org/) hourly event files, with
 Bronze/Silver/Gold modeling and MLflow-managed forecasting.
 
-**Status:** schema validation complete (spec Tasks 1–3). The empirical
-findings materially change the downstream design — read
+**Status:** schema validation complete (spec Tasks 1–3); Bronze ingestion
+implemented (spec §21 step 5) and validated locally against all 499,742
+sampled events — in-workspace execution of notebooks 01/02 is the next
+verification step. The empirical findings materially change the downstream
+design — read
 [`docs/schema_validation_report.md`](docs/schema_validation_report.md) before
 touching Silver/Gold code. Highlights from 499,742 profiled events
 (3 sampled hours, 2026-07):
@@ -28,16 +31,22 @@ touching Silver/Gold code. Highlights from 499,742 profiled events
 src/github_observatory/
   common/config.py        Unity Catalog names, source URL template
   ingestion/download_gharchive.py   idempotent hourly downloader + audit log
+  ingestion/bronze_ingest.py        raw files → bronze.events_raw/quarantine/audit
   schema/profile_schema.py          stream schema profiler + Delta writer
 notebooks/
   01_download_and_profile.py        run download + profiling on Databricks
+  02_bronze_ingest.py               create + load the Bronze tables
   exploration/                      original catalog/volume setup notebooks
+scripts/
+  databricks_run.py                 sync repo into workspace, run notebooks
+                                    on serverless via REST (stdlib only)
 docs/
   current_state.md                  repo/infra audit (Task 1)
   schema_validation_report.md       empirical schema findings (Task 3)
   open_questions.md                 tracked unknowns + resolutions
 artifacts/schema_profile/           committed profile CSV + summary JSON
-tests/unit/                         downloader + profiler tests (no network)
+tests/unit/                         downloader + profiler + bronze tests
+                                    (no network, no Spark)
 ```
 
 ## Environment
@@ -63,6 +72,10 @@ PYTHONPATH=src python -m github_observatory.ingestion.download_gharchive \
 # 3. Profile the stream schema
 PYTHONPATH=src python -m github_observatory.schema.profile_schema \
     ./raw_files/*.json.gz --out-dir artifacts/schema_profile
+
+# 4. Dry-run the Bronze parse path (no Spark, nothing written)
+PYTHONPATH=src python -m github_observatory.ingestion.bronze_ingest \
+    ./raw_files/*.json.gz
 ```
 
 Note: the GH Archive hour segment is unpadded (`…-3.json.gz`, not `…-03`),
@@ -70,10 +83,27 @@ and requests need a browser-like User-Agent — both handled by the downloader.
 
 ## Quickstart (Databricks)
 
-Sync the repo into the workspace and run
-`notebooks/01_download_and_profile.py` on serverless compute. It verifies the
-catalog/schemas/volume, downloads the sample hours into the raw Volume,
-profiles them, and writes `github_observatory.bronze.schema_profile`.
+With `DATABRICKS_HOST`/`DATABRICKS_TOKEN` exported, sync and run everything
+from any dev box (stdlib only, no CLI install):
+
+```bash
+python scripts/databricks_run.py check
+python scripts/databricks_run.py sync-repo --branch claude/github-observatory-spec-lfr2c4
+python scripts/databricks_run.py run-notebook \
+    "/Repos/<me>/github-engineering-observatory/notebooks/01_download_and_profile"
+python scripts/databricks_run.py run-notebook \
+    "/Repos/<me>/github-engineering-observatory/notebooks/02_bronze_ingest"
+```
+
+Notebook 01 verifies the catalog/schemas/volume, downloads the sample hours
+into the raw Volume, profiles them, and writes
+`github_observatory.bronze.schema_profile`. Notebook 02 creates
+`bronze.events_raw` / `events_quarantine` / `ingestion_audit`, ingests every
+hour file in the Volume idempotently (MERGE on `event_id`), and reconciles
+counts against the schema profile. If workspace egress to
+`data.gharchive.org` is blocked, download locally and use
+`scripts/databricks_run.py upload raw_files/*.json.gz --dest
+/Volumes/github_observatory/bronze/raw_files`.
 
 ## Roadmap (spec §21)
 
@@ -81,7 +111,8 @@ profiles them, and writes `github_observatory.bronze.schema_profile`.
 2. ~~Sample download~~
 3. ~~Schema profiling~~
 4. ~~Schema validation report~~
-5. Bronze ingestion (`events_raw`, quarantine, audit) ← next
+5. ~~Bronze ingestion (`events_raw`, quarantine, audit)~~ — implemented;
+   in-workspace run pending credentials ← next
 6. Silver normalization and lifecycle tables
 7. Gold production metrics; velocity/acceleration
 8. Flow, contribution, engagement metrics; data-quality monitoring

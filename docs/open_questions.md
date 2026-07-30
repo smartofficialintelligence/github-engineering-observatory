@@ -98,6 +98,10 @@ Files appear ~65 min after the hour. If GH Archive re-uploads corrected
 files, size/sha drift matters (idempotent skip would keep the stale copy).
 The downloader already records sha256; add a periodic re-verify job later.
 
+*Data point (2026-07-30):* all three sample hours re-downloaded from a
+different machine/network hours after the first fetch produced byte-identical
+files (same sha256) — no drift observed within a same-day window.
+
 ## OQ-12 — Forecast target confirmation
 
 `total_events_next_hour` and `push_events_next_hour` (spec §16) are
