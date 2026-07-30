@@ -7,9 +7,12 @@ engagement, sustainability, and network structure — built on
 Bronze/Silver/Gold modeling and MLflow-managed forecasting.
 
 **Status:** schema validation complete (spec Tasks 1–3); Bronze ingestion
-implemented (spec §21 step 5) and validated locally against all 499,742
-sampled events — in-workspace execution of notebooks 01/02 is the next
-verification step. The empirical findings materially change the downstream
+(spec §21 step 5) implemented and verified in-workspace 2026-07-30 —
+notebooks 01/02 ran green on serverless; `bronze.events_raw` holds all
+499,742 sampled events (0 duplicates, 0 quarantined, exactly one
+`public=false` ForkEvent per Finding S6) and `bronze.schema_profile` holds
+the 1,513 profile rows. Next: Silver normalization (spec §21 step 6).
+The empirical findings materially change the downstream
 design — read
 [`docs/schema_validation_report.md`](docs/schema_validation_report.md) before
 touching Silver/Gold code. Highlights from 499,742 profiled events
@@ -111,9 +114,9 @@ counts against the schema profile. If workspace egress to
 2. ~~Sample download~~
 3. ~~Schema profiling~~
 4. ~~Schema validation report~~
-5. ~~Bronze ingestion (`events_raw`, quarantine, audit)~~ — implemented;
-   in-workspace run pending credentials ← next
-6. Silver normalization and lifecycle tables
+5. ~~Bronze ingestion (`events_raw`, quarantine, audit)~~ — verified
+   in-workspace 2026-07-30
+6. Silver normalization and lifecycle tables ← next
 7. Gold production metrics; velocity/acceleration
 8. Flow, contribution, engagement metrics; data-quality monitoring
 9. Seasonal-naive forecast + statistical baselines, MLflow tracking
