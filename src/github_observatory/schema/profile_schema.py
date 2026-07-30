@@ -586,7 +586,7 @@ def write_profile_delta(
     df.write.format("delta").mode(mode).option("overwriteSchema", "true").saveAsTable(table)
 
 
-def _infer_source_hour(path: str) -> dt.datetime | None:
+def infer_source_hour(path: str) -> dt.datetime | None:
     m = re.match(r"^(\d{4})-(\d{2})-(\d{2})-(\d{1,2})\.json(\.gz)?$", os.path.basename(path))
     if not m:
         return None
@@ -605,7 +605,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     profiler = StreamProfiler()
     for path in args.files:
-        profiler.profile_file(path, source_hour=_infer_source_hour(path), max_events=args.max_events)
+        profiler.profile_file(path, source_hour=infer_source_hour(path), max_events=args.max_events)
 
     rows = profiler.profile_rows()
     summary = profiler.summary()

@@ -230,10 +230,10 @@ def test_profile_file_handles_malformed_lines_and_hour_mismatch(tmp_path):
     assert file_stats["min_created_at"] == "2026-07-29T15:10:00Z"
 
 
-def test_infer_source_hour_from_filename():
-    inferred = ps._infer_source_hour("/data/2026-07-29-3.json.gz")
+def testinfer_source_hour_from_filename():
+    inferred = ps.infer_source_hour("/data/2026-07-29-3.json.gz")
     assert inferred == dt.datetime(2026, 7, 29, 3, tzinfo=dt.timezone.utc)
-    assert ps._infer_source_hour("notes.txt") is None
+    assert ps.infer_source_hour("notes.txt") is None
 
 
 # --------------------------------------------------------------------------
