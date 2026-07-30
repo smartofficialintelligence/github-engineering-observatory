@@ -6,14 +6,18 @@ engagement, sustainability, and network structure — built on
 [GH Archive](https://www.gharchive.org/) hourly event files, with
 Bronze/Silver/Gold modeling and MLflow-managed forecasting.
 
-**Status:** Bronze **and Silver** built and verified in-workspace
-2026-07-30 (spec §21 steps 1–6) — notebooks 01/02/03 ran green on
-serverless. `bronze.events_raw` and `silver.events` both hold all 499,742
-sampled events (Silver flags rather than drops: exactly one `non_public`
-row, Finding S6); lifecycle tables `pr_events`/`issue_events`/
-`review_events`/`release_events` reconcile with the validation report
-(821/503/124/35 rows, PR action and review-state distributions exact).
-Next: Gold production metrics (spec §21 step 7).
+**Status: all spec §21 steps (1–10) complete and verified in-workspace
+2026-07-30.** Notebooks 01–08 ran green on serverless; the scheduled job
+`github-observatory-hourly-refresh` (hourly at :20 UTC) now keeps the
+lakehouse current end to end. Current state: **13.2M events** across a
+contiguous 72h backfill (2026-07-27→29) plus live hourly ingestion,
+perfect Bronze↔Silver parity on all files (0 data-quality violations),
+full Gold surface (hourly production metrics + velocity, flow,
+contribution, engagement, retention, network) and the seasonal-naive
+forecast slice with MLflow tracking. Early honest result: with only 3
+days of history `naive_1h` beats `seasonal_24h` (MASE 1.0 vs 1.28,
+sMAPE ≈ 2%) — revisit once the scheduler accumulates ≥2 weeks (OQ-9,
+OQ-12).
 The empirical findings materially change the downstream
 design — read
 [`docs/schema_validation_report.md`](docs/schema_validation_report.md) before
@@ -142,7 +146,14 @@ counts against the schema profile. If workspace egress to
    in-workspace 2026-07-30
 6. ~~Silver normalization and lifecycle tables~~ — verified in-workspace
    2026-07-30
-7. Gold production metrics; velocity/acceleration ← next
-8. Flow, contribution, engagement metrics; data-quality monitoring
-9. Seasonal-naive forecast + statistical baselines, MLflow tracking
-10. Retraining workflow, sustainability and network metrics
+7. ~~Gold production metrics; velocity/acceleration~~ — verified 2026-07-30
+8. ~~Flow, contribution, engagement metrics; data-quality monitoring~~ —
+   verified 2026-07-30
+9. ~~Seasonal-naive forecast + statistical baselines, MLflow tracking~~ —
+   verified 2026-07-30
+10. ~~Retraining workflow, sustainability and network metrics~~ —
+    scheduled job live 2026-07-30
+
+All roadmap steps are complete; ongoing work is operating the hourly
+pipeline, deepening backfill, and resolving the tracked open questions
+(`docs/open_questions.md`).
