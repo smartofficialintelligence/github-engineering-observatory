@@ -39,7 +39,7 @@ src/github_observatory/
   ingestion/bronze_ingest.py        raw files → bronze.events_raw/quarantine/audit
   schema/profile_schema.py          stream schema profiler + Delta writer
   silver/transforms.py              Bronze → silver.events + lifecycle tables
-                                    (SQL production path + stdlib reference impl)
+                                    (MERGE SQL builders — the single implementation)
 notebooks/
   01_download_and_profile.py        run download + profiling on Databricks
   02_bronze_ingest.py               create + load the Bronze tables
@@ -53,8 +53,9 @@ docs/
   schema_validation_report.md       empirical schema findings (Task 3)
   open_questions.md                 tracked unknowns + resolutions
 artifacts/schema_profile/           committed profile CSV + summary JSON
-tests/unit/                         downloader + profiler + bronze tests
-                                    (no network, no Spark)
+tests/unit/                         fast tests — no network, no Spark
+tests/integration/                  the real MERGE SQL on local OSS
+                                    Spark + Delta (dev extras; ANSI on)
 ```
 
 ## Environment
@@ -67,11 +68,17 @@ Compute:  serverless
 
 ## Quickstart (local — no Spark needed)
 
-Core modules are stdlib-only; Python ≥ 3.10.
+Core modules are stdlib-only; Python ≥ 3.10. The `dev` extras add
+pytest plus pyspark/delta-spark (needs a JVM) for the integration tier,
+which executes the production MERGE SQL against local Delta tables —
+`GITHUB_OBSERVATORY_CATALOG=spark_catalog` retargets the three-part
+table names at the local session catalog.
 
 ```bash
 # 1. Run tests
-pip install pytest && python -m pytest tests/unit -q
+pip install -e ".[dev]"
+python -m pytest tests/unit -q          # fast tier (<1s)
+python -m pytest tests/integration -q   # real SQL on local Delta (~80s)
 
 # 2. Download sample hours (idempotent; writes JSONL audit records)
 PYTHONPATH=src python -m github_observatory.ingestion.download_gharchive \

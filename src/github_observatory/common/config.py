@@ -3,9 +3,15 @@
 Every module must reference these constants instead of hard-coding
 catalog/schema/table names, so a future environment change is a
 one-file edit.
+
+``GITHUB_OBSERVATORY_CATALOG`` overrides the catalog name; the
+integration tests set it to ``spark_catalog`` so the same three-part
+table names resolve against local OSS Spark + Delta.
 """
 
-CATALOG = "github_observatory"
+import os
+
+CATALOG = os.environ.get("GITHUB_OBSERVATORY_CATALOG", "github_observatory")
 
 BRONZE_SCHEMA = f"{CATALOG}.bronze"
 SILVER_SCHEMA = f"{CATALOG}.silver"

@@ -8,8 +8,12 @@
 # MAGIC 2. creates the five Silver tables if missing;
 # MAGIC 3. runs the idempotent MERGE transforms (`silver.events`, `pr_events`,
 # MAGIC    `issue_events`, `review_events`, `release_events`);
-# MAGIC 4. reconciles the SQL build against the pure-python reference
-# MAGIC    implementation on a row sample and against known sample-level counts.
+# MAGIC 4. asserts structural invariants (row parity with Bronze, key
+# MAGIC    uniqueness, flag coverage) and displays known distributions.
+# MAGIC
+# MAGIC The same MERGE SQL is exercised pre-push by `tests/integration`
+# MAGIC (local OSS Spark + Delta, ANSI on); this notebook is the
+# MAGIC authoritative check on the real serverless runtime.
 # MAGIC
 # MAGIC Design decisions (from `docs/schema_validation_report.md` §8): no
 # MAGIC `pr_state`/`pr_merged` columns (gone from the 2026 stream) — lifecycle
@@ -85,52 +89,29 @@ display(silver_events.groupBy("quality_flag").count())
 
 # COMMAND ----------
 
-# DBTITLE 1,Reconcile: SQL build vs python reference implementation
-# Re-derive silver rows for a sample of Bronze rows with the stdlib
-# reference extractors and compare scalar-for-scalar against what the
-# SQL MERGE wrote. The two implementations must never drift.
-import datetime as dt
-
-from github_observatory.silver.transforms import silver_event_row
-
+# DBTITLE 1,Spot-check: Silver scalars against the Bronze JSON they came from
+# Cross-column consistency on a deterministic sample, computed entirely
+# in SQL on the serverless runtime: every extracted scalar must equal a
+# fresh extraction from the Bronze JSON strings.
 SAMPLE_N = 2000
-bronze_sample = (
-    spark.table("bronze.events_raw")
-    .orderBy(F.crc32(F.col("event_id")))  # deterministic pseudo-random sample
-    .limit(SAMPLE_N)
-    .collect()
-)
-sampled_ids = [r["event_id"] for r in bronze_sample]
-silver_rows = {
-    r["event_id"]: r.asDict()
-    for r in silver_events.filter(F.col("event_id").isin(sampled_ids)).collect()
-}
-
-COMPARE_COLS = [
-    "event_type", "public", "actor_id", "actor_login", "actor_is_bot",
-    "repo_id", "repo_name", "org_id", "org_login",
-    "payload_action", "payload_ref", "payload_ref_type", "push_id", "quality_flag",
-]
-mismatches = []
-for bronze_row in bronze_sample:
-    ref = silver_event_row(bronze_row.asDict())
-    got = silver_rows.get(bronze_row["event_id"])
-    if got is None:
-        mismatches.append((bronze_row["event_id"], "MISSING_IN_SILVER", None, None))
-        continue
-    for col in COMPARE_COLS:
-        if ref[col] != got[col]:
-            mismatches.append((bronze_row["event_id"], col, ref[col], got[col]))
-    # timestamp column: compare instants
-    ref_ts = bronze_row["created_at"]
-    if ref_ts and got["created_at"]:
-        expected = dt.datetime.fromisoformat(ref_ts.replace("Z", "+00:00"))
-        actual = got["created_at"].replace(tzinfo=dt.timezone.utc)
-        if expected != actual:
-            mismatches.append((bronze_row["event_id"], "created_at", expected, actual))
-
-assert not mismatches, f"{len(mismatches)} mismatches, first 5: {mismatches[:5]}"
-print(f"reference reconciliation: {len(bronze_sample):,} rows, {len(COMPARE_COLS) + 1} columns, 0 mismatches")
+inconsistent = spark.sql(f"""
+    WITH sample AS (
+        SELECT * FROM bronze.events_raw ORDER BY crc32(event_id) LIMIT {SAMPLE_N}
+    )
+    SELECT s.event_id
+    FROM sample s JOIN silver.events e USING (event_id)
+    WHERE NOT (
+        e.actor_id <=> TRY_CAST(get_json_object(s.actor_json, '$.id') AS BIGINT)
+        AND e.actor_login <=> get_json_object(s.actor_json, '$.login')
+        AND e.repo_id <=> TRY_CAST(get_json_object(s.repo_json, '$.id') AS BIGINT)
+        AND e.org_login <=> get_json_object(s.org_json, '$.login')
+        AND e.payload_action <=> get_json_object(s.payload_json, '$.action')
+        AND e.push_id <=> TRY_CAST(get_json_object(s.payload_json, '$.push_id') AS BIGINT)
+        AND e.created_at <=> TRY_CAST(s.created_at AS TIMESTAMP)
+    )
+""").collect()
+assert not inconsistent, f"{len(inconsistent)} inconsistent rows, first 5: {inconsistent[:5]}"
+print(f"spot-check: {SAMPLE_N:,} sampled rows consistent with their Bronze JSON")
 
 # COMMAND ----------
 

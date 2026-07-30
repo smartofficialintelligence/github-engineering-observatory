@@ -16,6 +16,10 @@ dependencies = []
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0",
+    # Integration tests run the real MERGE SQL against local Delta.
+    # Runtime dependencies stay empty — core modules are stdlib-only.
+    "pyspark==4.0.*",
+    "delta-spark==4.0.*",
 ]
 
 [tool.setuptools.packages.find]
