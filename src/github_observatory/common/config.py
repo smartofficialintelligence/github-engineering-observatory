@@ -22,6 +22,13 @@ EVENTS_QUARANTINE_TABLE = f"{BRONZE_SCHEMA}.events_quarantine"
 INGESTION_AUDIT_TABLE = f"{BRONZE_SCHEMA}.ingestion_audit"
 SCHEMA_PROFILE_TABLE = f"{BRONZE_SCHEMA}.schema_profile"
 
+# Silver tables
+SILVER_EVENTS_TABLE = f"{SILVER_SCHEMA}.events"
+SILVER_PR_EVENTS_TABLE = f"{SILVER_SCHEMA}.pr_events"
+SILVER_ISSUE_EVENTS_TABLE = f"{SILVER_SCHEMA}.issue_events"
+SILVER_REVIEW_EVENTS_TABLE = f"{SILVER_SCHEMA}.review_events"
+SILVER_RELEASE_EVENTS_TABLE = f"{SILVER_SCHEMA}.release_events"
+
 # GH Archive source. NOTE (verified empirically 2026-07-30): the hour
 # segment is NOT zero-padded — 2026-07-29-3.json.gz exists while
 # 2026-07-29-03.json.gz returns 404.

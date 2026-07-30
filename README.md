@@ -36,9 +36,12 @@ src/github_observatory/
   ingestion/download_gharchive.py   idempotent hourly downloader + audit log
   ingestion/bronze_ingest.py        raw files → bronze.events_raw/quarantine/audit
   schema/profile_schema.py          stream schema profiler + Delta writer
+  silver/transforms.py              Bronze → silver.events + lifecycle tables
+                                    (SQL production path + stdlib reference impl)
 notebooks/
   01_download_and_profile.py        run download + profiling on Databricks
   02_bronze_ingest.py               create + load the Bronze tables
+  03_silver_build.py                build Silver, reconcile SQL vs reference
   exploration/                      original catalog/volume setup notebooks
 scripts/
   databricks_run.py                 sync repo into workspace, run notebooks
