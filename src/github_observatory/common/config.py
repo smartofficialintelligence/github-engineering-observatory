@@ -38,6 +38,15 @@ SILVER_RELEASE_EVENTS_TABLE = f"{SILVER_SCHEMA}.release_events"
 # Gold tables/views
 GOLD_ECOSYSTEM_HOURLY_TABLE = f"{GOLD_SCHEMA}.ecosystem_hourly"
 GOLD_ECOSYSTEM_VELOCITY_VIEW = f"{GOLD_SCHEMA}.ecosystem_velocity"
+GOLD_FLOW_DAILY_TABLE = f"{GOLD_SCHEMA}.flow_daily"
+GOLD_ACTOR_FIRST_SEEN_TABLE = f"{GOLD_SCHEMA}.actor_first_seen"
+GOLD_CONTRIBUTION_DAILY_TABLE = f"{GOLD_SCHEMA}.contribution_daily"
+GOLD_ENGAGEMENT_DAILY_TABLE = f"{GOLD_SCHEMA}.engagement_daily"
+GOLD_DATA_QUALITY_TABLE = f"{GOLD_SCHEMA}.data_quality"
+GOLD_RETENTION_DAILY_TABLE = f"{GOLD_SCHEMA}.actor_retention_daily"
+GOLD_NETWORK_DAILY_TABLE = f"{GOLD_SCHEMA}.network_daily"
+GOLD_FORECAST_EVAL_TABLE = f"{GOLD_SCHEMA}.forecast_eval"
+GOLD_FORECAST_PREDICTIONS_TABLE = f"{GOLD_SCHEMA}.forecast_predictions"
 
 # GH Archive source. NOTE (verified empirically 2026-07-30): the hour
 # segment is NOT zero-padded — 2026-07-29-3.json.gz exists while

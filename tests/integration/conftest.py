@@ -32,13 +32,19 @@ os.environ["GITHUB_OBSERVATORY_CATALOG"] = "spark_catalog"
 import github_observatory.common.config as config  # noqa: E402
 
 importlib.reload(config)
+import github_observatory.forecasting.seasonal_naive as seasonal_naive  # noqa: E402
+import github_observatory.gold.behavior as gold_behavior  # noqa: E402
 import github_observatory.gold.metrics as gold_metrics  # noqa: E402
+import github_observatory.gold.sustainability as gold_sustainability  # noqa: E402
 import github_observatory.ingestion.bronze_ingest as bronze_ingest  # noqa: E402
 import github_observatory.silver.transforms as transforms  # noqa: E402
 
 importlib.reload(bronze_ingest)
 importlib.reload(transforms)
 importlib.reload(gold_metrics)
+importlib.reload(gold_behavior)
+importlib.reload(gold_sustainability)
+importlib.reload(seasonal_naive)
 
 assert config.EVENTS_RAW_TABLE == "spark_catalog.bronze.events_raw"
 

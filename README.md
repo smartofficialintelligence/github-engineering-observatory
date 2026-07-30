@@ -41,12 +41,20 @@ src/github_observatory/
   silver/transforms.py              Bronze → silver.events + lifecycle tables
                                     (MERGE SQL builders — the single implementation)
   gold/metrics.py                   silver.events → gold.ecosystem_hourly
-                                    + ecosystem_velocity view (metric defs v1)
+                                    + ecosystem_velocity view
+  gold/behavior.py                  flow / contribution / engagement /
+                                    data-quality daily tables
+  gold/sustainability.py            actor retention + network structure
+  forecasting/seasonal_naive.py     gap-aware baselines + eval (pure stdlib)
 notebooks/
   01_download_and_profile.py        run download + profiling on Databricks
   02_bronze_ingest.py               create + load the Bronze tables
   03_silver_build.py                build Silver + serverless spot-checks
   04_gold_build.py                  build Gold hourly metrics + invariants
+  05_backfill.py                    contiguous 72h window: download→Bronze→Gold
+  06_behavior_build.py              behavior/sustainability/DQ build + checks
+  07_forecast.py                    forecast eval + MLflow + next-hour
+  08_hourly_pipeline.py             schedulable end-to-end hourly refresh
   exploration/                      original catalog/volume setup notebooks
 scripts/
   databricks_run.py                 sync repo into workspace, run notebooks
@@ -54,7 +62,7 @@ scripts/
 docs/
   current_state.md                  repo/infra audit (Task 1)
   schema_validation_report.md       empirical schema findings (Task 3)
-  metric_definitions.md             versioned metric contract (v1; OQ-7 whitelist)
+  metric_definitions.md             versioned metric contract (v2; OQ-7 whitelist)
   open_questions.md                 tracked unknowns + resolutions
 artifacts/schema_profile/           committed profile CSV + summary JSON
 tests/unit/                         fast tests — no network, no Spark

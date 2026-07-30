@@ -219,6 +219,58 @@ def cmd_run_notebook(args: argparse.Namespace) -> int:
     return 0
 
 
+PIPELINE_JOB_NAME = "github-observatory-hourly-refresh"
+
+
+def cmd_create_job(args: argparse.Namespace) -> int:
+    """Create or update the scheduled hourly-refresh job (notebook 08)."""
+    existing = api(
+        "GET", "/api/2.2/jobs/list", query={"name": PIPELINE_JOB_NAME}
+    ).get("jobs", [])
+    settings = {
+        "name": PIPELINE_JOB_NAME,
+        "tasks": [
+            {
+                "task_key": "hourly_refresh",
+                "notebook_task": {
+                    "notebook_path": args.notebook_path,
+                    "source": "WORKSPACE",
+                },
+            }
+        ],
+        "schedule": {
+            # :20 past every hour — the archive publishes ~:05 for the
+            # previous-previous hour; :20 leaves slack.
+            "quartz_cron_expression": "0 20 * * * ?",
+            "timezone_id": "UTC",
+            "pause_status": "PAUSED" if args.paused else "UNPAUSED",
+        },
+        "max_concurrent_runs": 1,
+    }
+    try:
+        if existing:
+            job_id = existing[0]["job_id"]
+            api("POST", "/api/2.2/jobs/reset", {"job_id": job_id, "new_settings": settings})
+            print(f"updated job {job_id} ({PIPELINE_JOB_NAME})")
+        else:
+            job_id = api("POST", "/api/2.2/jobs/create", settings)["job_id"]
+            print(f"created job {job_id} ({PIPELINE_JOB_NAME})")
+    except ApiError as exc:
+        if "schedule" in str(exc).lower() or exc.status == 400:
+            print(
+                "job with schedule rejected (plan restriction?) — retrying unscheduled",
+                file=sys.stderr,
+            )
+            settings.pop("schedule")
+            job_id = api("POST", "/api/2.2/jobs/create", settings)["job_id"]
+            print(f"created UNSCHEDULED job {job_id}; trigger manually or via "
+                  f"POST /api/2.2/jobs/run-now")
+        else:
+            raise
+    print(f"schedule: hourly at :20 UTC ({'paused' if args.paused else 'active'})")
+    return 0
+
+
 def cmd_upload(args: argparse.Namespace) -> int:
     dest = args.dest.rstrip("/")
     if not dest.startswith("/Volumes/"):
@@ -254,12 +306,24 @@ def main(argv: list[str] | None = None) -> int:
     p_up.add_argument("files", nargs="+")
     p_up.add_argument("--dest", required=True, help="/Volumes/... directory")
 
+    p_job = sub.add_parser(
+        "create-job", help="create/update the scheduled hourly-refresh job"
+    )
+    p_job.add_argument(
+        "notebook_path", help="workspace path of notebooks/08_hourly_pipeline"
+    )
+    p_job.add_argument(
+        "--paused", action="store_true",
+        help="register the schedule paused (activate later in the UI)",
+    )
+
     args = parser.parse_args(argv)
     handler = {
         "check": cmd_check,
         "sync-repo": cmd_sync_repo,
         "run-notebook": cmd_run_notebook,
         "upload": cmd_upload,
+        "create-job": cmd_create_job,
     }[args.command]
     try:
         return handler(args)

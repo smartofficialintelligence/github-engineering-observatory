@@ -42,7 +42,7 @@ PRODUCTION_EVENTS: dict[str, tuple[str, ...] | None] = {
     "ReleaseEvent": ("published",),
 }
 
-METRIC_DEFINITIONS_VERSION = 1
+METRIC_DEFINITIONS_VERSION = 2
 
 ECOSYSTEM_HOURLY_DDL = (
     "event_hour TIMESTAMP, "
