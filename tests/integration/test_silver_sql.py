@@ -10,120 +10,14 @@ from __future__ import annotations
 
 import gzip
 import json
-import os
 
-import pytest
-
-# conftest.py has already set GITHUB_OBSERVATORY_CATALOG and reloaded
-# these modules; sys.modules hands back the retargeted versions.
-import github_observatory.ingestion.bronze_ingest as bronze_ingest
-import github_observatory.silver.transforms as transforms
-
-
-def make_event(event_id, event_type="PushEvent", **overrides):
-    event = {
-        "id": event_id,
-        "type": event_type,
-        "actor": {"id": 1, "login": "alice"},
-        "repo": {"id": 2, "name": "alice/repo"},
-        "payload": {"push_id": 99, "ref": "refs/heads/main"},
-        "public": True,
-        "created_at": "2026-07-29T15:00:01Z",
-    }
-    event.update(overrides)
-    return event
-
-
-SYNTHETIC_EVENTS = [
-    make_event("1"),  # plain push
-    make_event(
-        "2",
-        actor={"id": 9, "login": "github-actions[bot]"},
-        org={"id": 77, "login": "acme"},
-    ),  # bot actor + org
-    make_event(
-        "3",
-        event_type="PullRequestEvent",
-        payload={
-            "action": "merged",
-            "number": 7,
-            "pull_request": {
-                "id": 555,
-                "number": 7,
-                "base": {"ref": "main", "sha": "c" * 40},
-                "head": {"ref": "feat", "sha": "d" * 40},
-            },
-        },
-    ),
-    make_event(
-        "4",
-        event_type="IssueCommentEvent",
-        payload={
-            "action": "created",
-            "issue": {
-                "id": 900,
-                "number": 7,  # same number space as the PR — flag must separate
-                "state": "open",
-                "comments": 4,
-                "pull_request": {"merged_at": "2026-07-02T10:00:00Z"},
-            },
-        },
-    ),
-    make_event(
-        "5",
-        event_type="PullRequestReviewEvent",
-        payload={
-            "action": "created",
-            "pull_request": {"id": 555, "number": 7},
-            "review": {
-                "id": 42,
-                "state": "approved",
-                "submitted_at": "2026-07-29T15:00:05Z",
-                "commit_id": "e" * 40,
-            },
-        },
-    ),
-    make_event(
-        "6",
-        event_type="ReleaseEvent",
-        payload={
-            "action": "published",
-            "release": {
-                "id": 10,
-                "tag_name": "v1.0",
-                "prerelease": False,
-                "draft": False,
-                "immutable": True,
-                "published_at": "2026-07-29T15:00:00Z",
-                "assets": [
-                    {"download_count": 5},
-                    {"download_count": 7},
-                    {"other": True},
-                ],
-            },
-        },
-    ),
-    make_event("7", public=False, repo={}, event_type="ForkEvent"),  # Finding S6
-    make_event("8", event_type="BrandNewEvent"),  # unknown type must ingest
-    make_event(42),  # integer id, normalized to STRING
-]
-
-
-@pytest.fixture(scope="session")
-def ingested(bronze_tables, silver_tables, tmp_path_factory):
-    """Write the synthetic hour file, ingest to Bronze, build Silver."""
-    spark = bronze_tables
-    raw_dir = tmp_path_factory.mktemp("raw")
-    path = str(raw_dir / "2026-01-01-0.json.gz")
-    lines = [json.dumps(e).encode() for e in SYNTHETIC_EVENTS]
-    lines.insert(3, b"this is not json {")  # malformed -> quarantine
-    lines.append(json.dumps(make_event("1")).encode())  # in-file duplicate
-    with open(path, "wb") as fh:
-        fh.write(gzip.compress(b"\n".join(lines) + b"\n"))
-
-    stats = bronze_ingest.ingest_file(spark, path)
-    metrics = transforms.build_silver(spark)
-    return spark, stats, metrics
+from conftest import (
+    SYNTHETIC_EVENTS,
+    SYNTHETIC_HOUR_FILE,
+    bronze_ingest,
+    make_event,
+    transforms,
+)
 
 
 def one(spark, sql):
@@ -166,7 +60,7 @@ def test_events_row_parity_and_uniqueness(ingested):
     counts = one(
         spark,
         "SELECT COUNT(*) AS n, COUNT(DISTINCT event_id) AS d "
-        "FROM spark_catalog.silver.events",
+        f"FROM spark_catalog.silver.events WHERE source_file = '{SYNTHETIC_HOUR_FILE}'",
     )
     assert counts["n"] == 9  # every Bronze row, S6 included
     assert counts["d"] == 9
@@ -184,7 +78,7 @@ def test_events_typed_extraction(ingested):
     assert row["payload_ref"] == "refs/heads/main"
     assert row["push_id"] == 99
     assert row["quality_flag"] is None
-    assert row["created_at"].isoformat() == "2026-07-29T15:00:01"  # UTC session tz
+    assert row["created_at"].isoformat() == "2026-01-01T00:00:01"  # UTC session tz
 
 
 def test_events_bot_and_org(ingested):
@@ -214,7 +108,10 @@ def test_events_unknown_type_ingests(ingested):
 
 def test_pr_events_covers_all_pr_carrying_types(ingested):
     spark, _, _ = ingested
-    rows = spark.sql("SELECT event_id, event_type FROM spark_catalog.silver.pr_events").collect()
+    rows = spark.sql(
+        "SELECT event_id, event_type FROM spark_catalog.silver.pr_events "
+        f"WHERE source_date = DATE'2026-01-01'"
+    ).collect()
     # The PullRequestEvent AND the review event both carry pull_request.
     assert {(r["event_id"], r["event_type"]) for r in rows} == {
         ("3", "PullRequestEvent"),
@@ -234,8 +131,7 @@ def test_pr_events_merged_action(ingested):
 
 def test_issue_events_pr_partition_flag(ingested):
     spark, _, _ = ingested
-    row = one(spark, "SELECT * FROM spark_catalog.silver.issue_events")
-    assert row["event_id"] == "4"
+    row = one(spark, "SELECT * FROM spark_catalog.silver.issue_events WHERE event_id = '4'")
     assert row["issue_number"] == 7
     assert row["is_pull_request"] is True
     assert row["comment_count"] == 4
@@ -244,7 +140,7 @@ def test_issue_events_pr_partition_flag(ingested):
 
 def test_review_events(ingested):
     spark, _, _ = ingested
-    row = one(spark, "SELECT * FROM spark_catalog.silver.review_events")
+    row = one(spark, "SELECT * FROM spark_catalog.silver.review_events WHERE event_id = '5'")
     assert row["review_id"] == 42
     assert row["review_state"] == "approved"
     assert row["pr_number"] == 7
@@ -253,7 +149,7 @@ def test_review_events(ingested):
 
 def test_release_events_asset_aggregation(ingested):
     spark, _, _ = ingested
-    row = one(spark, "SELECT * FROM spark_catalog.silver.release_events")
+    row = one(spark, "SELECT * FROM spark_catalog.silver.release_events WHERE event_id = '6'")
     assert row["release_id"] == 10
     assert row["tag_name"] == "v1.0"
     assert row["assets_count"] == 3
@@ -270,8 +166,6 @@ def test_rebuild_inserts_nothing(ingested):
     metrics = transforms.build_silver(spark)
     for table, m in metrics.items():
         assert m.get("num_inserted_rows", 0) == 0, f"{table} not idempotent"
-    counts = one(spark, "SELECT COUNT(*) AS n FROM spark_catalog.silver.events")
-    assert counts["n"] == 9
 
 
 def test_where_predicate_restricts_scan(ingested):
@@ -282,10 +176,10 @@ def test_where_predicate_restricts_scan(ingested):
 
 
 def test_bronze_reingest_idempotent(ingested, tmp_path_factory):
-    spark, stats, _ = ingested
-    # Re-ingest the same file content under the same name.
+    spark, _, _ = ingested
+    # Re-ingest the same events under the same file name.
     raw_dir = tmp_path_factory.mktemp("raw2")
-    path = str(raw_dir / "2026-01-01-0.json.gz")
+    path = str(raw_dir / SYNTHETIC_HOUR_FILE)
     lines = [json.dumps(e).encode() for e in SYNTHETIC_EVENTS]
     with open(path, "wb") as fh:
         fh.write(gzip.compress(b"\n".join(lines) + b"\n"))
@@ -294,26 +188,18 @@ def test_bronze_reingest_idempotent(ingested, tmp_path_factory):
     assert stats2.duplicates_skipped == stats2.rows_staged
 
 
-# -- optional: one real GH Archive hour ---------------------------------------
-
-REAL_HOUR = os.path.join(
-    os.path.dirname(__file__), "..", "..", "raw_files", "2026-07-29-15.json.gz"
-)
+# -- one real GH Archive hour --------------------------------------------------
 
 
-@pytest.mark.skipif(not os.path.exists(REAL_HOUR), reason="sample hour not downloaded")
-def test_real_hour_end_to_end(bronze_tables, silver_tables):
+def test_real_hour_end_to_end(real_hour):
     """160,280 real events through the actual Bronze + Silver SQL."""
-    spark = bronze_tables
-    stats = bronze_ingest.ingest_file(spark, os.path.abspath(REAL_HOUR))
+    spark, stats = real_hour
     assert stats.lines_read == 160_280
     assert stats.quarantined == 0
-    transforms.build_silver(spark)
 
     counts = one(
         spark,
         "SELECT COUNT(*) AS n, COUNT(DISTINCT event_id) AS d, "
-        "SUM(CASE WHEN quality_flag IS NOT NULL THEN 1 ELSE 0 END) AS flagged, "
         "SUM(CASE WHEN created_at IS NULL AND quality_flag IS NULL THEN 1 ELSE 0 END) AS bad_ts "
         "FROM spark_catalog.silver.events WHERE source_file = '2026-07-29-15.json.gz'",
     )
@@ -324,7 +210,8 @@ def test_real_hour_end_to_end(bronze_tables, silver_tables):
     actions = {
         r["action"]
         for r in spark.sql(
-            "SELECT DISTINCT action FROM spark_catalog.silver.pr_events"
+            "SELECT DISTINCT action FROM spark_catalog.silver.pr_events "
+            "WHERE source_date = DATE'2026-07-29'"
         ).collect()
     }
     known = {

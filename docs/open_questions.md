@@ -31,8 +31,9 @@ are disjoint, but 3 hours is thin evidence.
 
 *Resolution path:* profile more hours; for a sample of `closed` PRs, check
 `issue.pull_request.merged_at` on later IssueCommentEvents or spot-check via
-API. Blocks final definitions of `prs_merged` and
-`pr_closed_without_merge_rate` (currently defined as action-based).
+API. `docs/metric_definitions.md` v1 adopts the disjoint interpretation
+(`pr_closed_no_merge` counts action `closed`); confirming or refuting it
+requires a metric-definitions version bump.
 
 ## OQ-3 — Why do `push_id` values repeat? (28 repeats in 477,433 pushes)
 
@@ -64,13 +65,6 @@ profiler before any backfill decision.
 Raw gz is ~0.5 GB/day; Bronze parsed Delta will be larger. Establish
 per-day Bronze/Silver storage after the first full ingested day, then set a
 retention/backfill budget.
-
-## OQ-7 — Which event set defines "production events"?
-
-New `labeled`/`unlabeled`/`assigned` actions inflate raw PR/issue event
-counts (labeled 145 vs opened 223 in sample). Production metrics must pick a
-whitelist (e.g. pushes, PR opened/merged, issues opened/closed, releases) —
-to be fixed in `docs/metric_definitions.md` before Gold implementation.
 
 ## OQ-8 — Bot classification beyond the `[bot]` suffix
 
@@ -122,3 +116,4 @@ be a non-push class (e.g. PR activity) despite coverage caveats.
 | R-5 | Are review states available? | **Yes.** `review.state` 100% on PullRequestReviewEvent; all four states observed. |
 | R-6 | Can issue/PR lifecycles be linked? | **Yes.** `(repo_id, number)` collision-free in sample; partition issues vs PRs via `issue.pull_request` marker. |
 | R-7 | Is event `id` a safe primary key? | **Yes.** 499,742/499,742 distinct, none missing. `push_id` is NOT unique (OQ-3). |
+| OQ-7 | Which event set defines "production events"? | **Resolved v1 (2026-07-30):** whitelist fixed in `docs/metric_definitions.md` — pushes always; PR opened/merged/closed/reopened; issues opened/closed/reopened; releases published. State-churn actions (labeled 145 vs opened 223 in-sample), comments, reviews, watch/fork, create/delete excluded. |

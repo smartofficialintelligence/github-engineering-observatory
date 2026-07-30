@@ -35,6 +35,10 @@ SILVER_ISSUE_EVENTS_TABLE = f"{SILVER_SCHEMA}.issue_events"
 SILVER_REVIEW_EVENTS_TABLE = f"{SILVER_SCHEMA}.review_events"
 SILVER_RELEASE_EVENTS_TABLE = f"{SILVER_SCHEMA}.release_events"
 
+# Gold tables/views
+GOLD_ECOSYSTEM_HOURLY_TABLE = f"{GOLD_SCHEMA}.ecosystem_hourly"
+GOLD_ECOSYSTEM_VELOCITY_VIEW = f"{GOLD_SCHEMA}.ecosystem_velocity"
+
 # GH Archive source. NOTE (verified empirically 2026-07-30): the hour
 # segment is NOT zero-padded — 2026-07-29-3.json.gz exists while
 # 2026-07-29-03.json.gz returns 404.
