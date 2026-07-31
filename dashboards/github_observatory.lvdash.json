@@ -11,7 +11,7 @@
       "name": "monthly_actor_kind",
       "displayName": "monthly_actor_kind",
       "queryLines": [
-        "\n            SELECT date_trunc('MONTH', event_hour) AS month,\n                   'bot' AS actor_kind, SUM(bot_events) AS events\n            FROM github_observatory.gold.ecosystem_hourly GROUP BY 1\n            UNION ALL\n            SELECT date_trunc('MONTH', event_hour) AS month,\n                   'human' AS actor_kind, SUM(total_events_human) AS events\n            FROM github_observatory.gold.ecosystem_hourly GROUP BY 1"
+        "\n            -- Coverage-normalized: avg events per observed hour, so months\n            -- with archive gaps (2016/2018 outages, partial 2026) show\n            -- their true hourly rate instead of cratering.\n            SELECT date_trunc('MONTH', event_hour) AS month,\n                   'bot' AS actor_kind,\n                   CAST(SUM(bot_events) / COUNT(*) AS BIGINT) AS events_per_hour,\n                   COUNT(*) AS hours_observed\n            FROM github_observatory.gold.ecosystem_hourly GROUP BY 1\n            UNION ALL\n            SELECT date_trunc('MONTH', event_hour) AS month,\n                   'human' AS actor_kind,\n                   CAST(SUM(total_events_human) / COUNT(*) AS BIGINT) AS events_per_hour,\n                   COUNT(*) AS hours_observed\n            FROM github_observatory.gold.ecosystem_hourly GROUP BY 1"
       ]
     },
     {
@@ -149,8 +149,8 @@
                       "expression": "`month`"
                     },
                     {
-                      "name": "events",
-                      "expression": "`events`"
+                      "name": "events_per_hour",
+                      "expression": "`events_per_hour`"
                     },
                     {
                       "name": "actor_kind",
@@ -164,7 +164,7 @@
               "version": 3,
               "widgetType": "area",
               "frame": {
-                "title": "Monthly event volume \u2014 humans vs bots (stacked)",
+                "title": "Avg events per hour \u2014 humans vs bots (coverage-normalized)",
                 "showTitle": true
               },
               "encodings": {
@@ -176,11 +176,11 @@
                   "displayName": "month"
                 },
                 "y": {
-                  "fieldName": "events",
+                  "fieldName": "events_per_hour",
                   "scale": {
                     "type": "quantitative"
                   },
-                  "displayName": "events"
+                  "displayName": "events_per_hour"
                 },
                 "color": {
                   "fieldName": "actor_kind",

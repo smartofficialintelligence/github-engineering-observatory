@@ -87,12 +87,19 @@ OBSERVATORY = {
                    CAST(AVG(distinct_actors) AS BIGINT) AS avg_hourly_actors
             FROM {G}.ecosystem_hourly GROUP BY 1, 2"""),
         dataset("monthly_actor_kind", f"""
+            -- Coverage-normalized: avg events per observed hour, so months
+            -- with archive gaps (2016/2018 outages, partial 2026) show
+            -- their true hourly rate instead of cratering.
             SELECT date_trunc('MONTH', event_hour) AS month,
-                   'bot' AS actor_kind, SUM(bot_events) AS events
+                   'bot' AS actor_kind,
+                   CAST(SUM(bot_events) / COUNT(*) AS BIGINT) AS events_per_hour,
+                   COUNT(*) AS hours_observed
             FROM {G}.ecosystem_hourly GROUP BY 1
             UNION ALL
             SELECT date_trunc('MONTH', event_hour) AS month,
-                   'human' AS actor_kind, SUM(total_events_human) AS events
+                   'human' AS actor_kind,
+                   CAST(SUM(total_events_human) / COUNT(*) AS BIGINT) AS events_per_hour,
+                   COUNT(*) AS hours_observed
             FROM {G}.ecosystem_hourly GROUP BY 1"""),
         dataset("hourly_recent", f"""
             SELECT event_hour, total_events, push_events, production_events,
@@ -138,10 +145,11 @@ OBSERVATORY = {
                        line_enc("month", "bot_share", color="source"),
                        (0, 0, 6, 8), fields=[field("month"), field("bot_share"), field("source")]),
                 widget("volume_stacked", "monthly_actor_kind", "area",
-                       "Monthly event volume — humans vs bots (stacked)",
-                       line_enc("month", "events", color="actor_kind"),
+                       "Avg events per hour — humans vs bots (coverage-normalized)",
+                       line_enc("month", "events_per_hour", color="actor_kind"),
                        (0, 8, 3, 7),
-                       fields=[field("month"), field("events"), field("actor_kind")]),
+                       fields=[field("month"), field("events_per_hour"),
+                               field("actor_kind")]),
                 widget("push_share_trend", "monthly_decade", "line",
                        "Push share (2026 jump = OQ-1 feed filtering, not behavior)",
                        line_enc("month", "push_share", color="source"),
