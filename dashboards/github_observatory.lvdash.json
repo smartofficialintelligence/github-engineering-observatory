@@ -1462,7 +1462,7 @@
                 "name": "main_query",
                 "query": {
                   "datasetName": "forecast_eval",
-                  "disaggregated": false,
+                  "disaggregated": true,
                   "fields": [
                     {
                       "name": "target",

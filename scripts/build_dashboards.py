@@ -25,9 +25,11 @@ def dataset(name: str, query: str) -> dict:
 
 
 def widget(name, dataset_name, wtype, title, encodings, pos, fields=None):
+    # Tables and counters render raw rows; aggregate mode leaves them
+    # with "no fields selected".
     query = {
         "datasetName": dataset_name,
-        "disaggregated": False,
+        "disaggregated": wtype in ("table", "counter"),
         "fields": fields or [],
     }
     return {

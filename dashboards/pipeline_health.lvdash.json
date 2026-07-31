@@ -49,7 +49,7 @@
                 "name": "main_query",
                 "query": {
                   "datasetName": "dq_violations",
-                  "disaggregated": false,
+                  "disaggregated": true,
                   "fields": [
                     {
                       "name": "violations",
@@ -89,7 +89,7 @@
                 "name": "main_query",
                 "query": {
                   "datasetName": "freshness",
-                  "disaggregated": false,
+                  "disaggregated": true,
                   "fields": [
                     {
                       "name": "latest_stream_hour",
@@ -133,7 +133,7 @@
                 "name": "main_query",
                 "query": {
                   "datasetName": "layer_counts",
-                  "disaggregated": false,
+                  "disaggregated": true,
                   "fields": [
                     {
                       "name": "layer",
@@ -245,7 +245,7 @@
                 "name": "main_query",
                 "query": {
                   "datasetName": "dq",
-                  "disaggregated": false,
+                  "disaggregated": true,
                   "fields": [
                     {
                       "name": "source_hour",
