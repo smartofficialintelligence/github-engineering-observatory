@@ -18,6 +18,15 @@ forecast slice with MLflow tracking. Early honest result: with only 3
 days of history `naive_1h` beats `seasonal_24h` (MASE 1.0 vs 1.28,
 sMAPE ≈ 2%) — revisit once the scheduler accumulates ≥2 weeks (OQ-9,
 OQ-12).
+
+**Deep history (2026-07-31):** `gold.ecosystem_hourly` now spans
+**2016→present** — 85,983 historical hours imported from the BigQuery
+public dataset (census columns only, `source='bigquery'`, $0 within the
+free query tier; see `docs/metric_definitions.md` v3). Decade headline:
+bot share of public events rose from **0% (2016) to 26.6% (2025)**.
+The 2025→2026 discontinuity (push share 65%→94%, bot share 27%→9%) is
+the strongest evidence yet for OQ-1: the 2026 feed is a filtered
+regime — never compare across `source` without caveats.
 The empirical findings materially change the downstream
 design — read
 [`docs/schema_validation_report.md`](docs/schema_validation_report.md) before
