@@ -23,6 +23,13 @@ counts over a fixed window against stargazer/fork deltas from the GitHub REST
 API; review GitHub changelog / GH Archive issue tracker for feed changes.
 Until resolved, publish non-push metrics with a coverage caveat.
 
+*Dating evidence (2026-07-31, from the BigQuery decade import):* the
+filtering rolled out progressively through 2025, not at the 2026
+boundary — total volume stepped down ~26% in **June 2025** (231k→150k
+events/hr from the March peak) and again in **October 2025** (121k),
+while push share climbed 64% → 70% → 94% (2026 stream). Monthly archive
+coverage was complete throughout, ruling out collection gaps.
+
 ## OQ-2 — Does PullRequestEvent `action='closed'` now mean closed-without-merge?
 
 2026 introduces `action='merged'` (172 in sample) alongside `closed` (12);
