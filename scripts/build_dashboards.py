@@ -86,6 +86,14 @@ OBSERVATORY = {
                    ROUND(SUM(push_events) / SUM(total_events), 4) AS push_share,
                    CAST(AVG(distinct_actors) AS BIGINT) AS avg_hourly_actors
             FROM {G}.ecosystem_hourly GROUP BY 1, 2"""),
+        dataset("monthly_actor_kind", f"""
+            SELECT date_trunc('MONTH', event_hour) AS month,
+                   'bot' AS actor_kind, SUM(bot_events) AS events
+            FROM {G}.ecosystem_hourly GROUP BY 1
+            UNION ALL
+            SELECT date_trunc('MONTH', event_hour) AS month,
+                   'human' AS actor_kind, SUM(total_events_human) AS events
+            FROM {G}.ecosystem_hourly GROUP BY 1"""),
         dataset("hourly_recent", f"""
             SELECT event_hour, total_events, push_events, production_events,
                    bot_events, distinct_actors
@@ -129,10 +137,11 @@ OBSERVATORY = {
                        "Bot share of public GitHub events — the automation curve",
                        line_enc("month", "bot_share", color="source"),
                        (0, 0, 6, 8), fields=[field("month"), field("bot_share"), field("source")]),
-                widget("volume_trend", "monthly_decade", "area",
-                       "Monthly event volume by source",
-                       line_enc("month", "events", color="source"),
-                       (0, 8, 3, 7), fields=[field("month"), field("events"), field("source")]),
+                widget("volume_stacked", "monthly_actor_kind", "area",
+                       "Monthly event volume — humans vs bots (stacked)",
+                       line_enc("month", "events", color="actor_kind"),
+                       (0, 8, 3, 7),
+                       fields=[field("month"), field("events"), field("actor_kind")]),
                 widget("push_share_trend", "monthly_decade", "line",
                        "Push share (2026 jump = OQ-1 feed filtering, not behavior)",
                        line_enc("month", "push_share", color="source"),

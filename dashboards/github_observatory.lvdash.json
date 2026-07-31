@@ -8,6 +8,13 @@
       ]
     },
     {
+      "name": "monthly_actor_kind",
+      "displayName": "monthly_actor_kind",
+      "queryLines": [
+        "\n            SELECT date_trunc('MONTH', event_hour) AS month,\n                   'bot' AS actor_kind, SUM(bot_events) AS events\n            FROM github_observatory.gold.ecosystem_hourly GROUP BY 1\n            UNION ALL\n            SELECT date_trunc('MONTH', event_hour) AS month,\n                   'human' AS actor_kind, SUM(total_events_human) AS events\n            FROM github_observatory.gold.ecosystem_hourly GROUP BY 1"
+      ]
+    },
+    {
       "name": "hourly_recent",
       "displayName": "hourly_recent",
       "queryLines": [
@@ -129,12 +136,12 @@
         },
         {
           "widget": {
-            "name": "volume_trend",
+            "name": "volume_stacked",
             "queries": [
               {
                 "name": "main_query",
                 "query": {
-                  "datasetName": "monthly_decade",
+                  "datasetName": "monthly_actor_kind",
                   "disaggregated": false,
                   "fields": [
                     {
@@ -146,8 +153,8 @@
                       "expression": "`events`"
                     },
                     {
-                      "name": "source",
-                      "expression": "`source`"
+                      "name": "actor_kind",
+                      "expression": "`actor_kind`"
                     }
                   ]
                 }
@@ -157,7 +164,7 @@
               "version": 3,
               "widgetType": "area",
               "frame": {
-                "title": "Monthly event volume by source",
+                "title": "Monthly event volume \u2014 humans vs bots (stacked)",
                 "showTitle": true
               },
               "encodings": {
@@ -176,11 +183,11 @@
                   "displayName": "events"
                 },
                 "color": {
-                  "fieldName": "source",
+                  "fieldName": "actor_kind",
                   "scale": {
                     "type": "categorical"
                   },
-                  "displayName": "source"
+                  "displayName": "actor_kind"
                 }
               }
             }
