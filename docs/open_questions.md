@@ -28,7 +28,13 @@ filtering rolled out progressively through 2025, not at the 2026
 boundary — total volume stepped down ~26% in **June 2025** (231k→150k
 events/hr from the March peak) and again in **October 2025** (121k),
 while push share climbed 64% → 70% → 94% (2026 stream). Monthly archive
-coverage was complete throughout, ruling out collection gaps.
+coverage was complete throughout, ruling out collection gaps. Pushes
+were not spared: pushes/hour fell ~28% in the June 2025 step
+(129k → 93k), then measured 156k/hr in the 2026 stream — the filter's
+composition evolved over time, so even within-filtered-era comparisons
+need care. The BigQuery mirror is faithful to the archive: hour
+2025-07-15T15 matches to the event (164,140 events / 98,194 pushes in
+both), so the steps are upstream of all collection.
 
 ## OQ-2 — Does PullRequestEvent `action='closed'` now mean closed-without-merge?
 

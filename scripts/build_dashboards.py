@@ -96,7 +96,10 @@ activity. Since mid-2025 it is not.
 month) with a second step in **October 2025**, most non-push event classes
 were progressively dropped or sampled upstream — by 2026 stars run at ~44/hr
 and PR events ~189/hr *for all of public GitHub*, which is implausibly low,
-while pushes kept flowing at realistic rates (push share rose 64% → 94%).
+while pushes were cut less deeply (−28% in June 2025; push share rose
+64% → 94%). The BigQuery mirror is faithful — an archive hour file and
+its BigQuery rows match to the event (verified 2025-07-15T15) — so the
+steps are in the feed itself, not the collection.
 Archive coverage was complete throughout, ruling out collection gaps: the
 *feed itself* was filtered. Who filters (GitHub's /events API vs archive
 collection) and by what rule is unresolved — tracked as **OQ-1**.
@@ -187,7 +190,8 @@ OBSERVATORY = {
         dataset("production_yoy", f"""
             WITH m AS (
                 SELECT date_trunc('MONTH', event_hour) AS month,
-                       SUM(push_events) / COUNT(*) AS pushes_per_hour
+                       SUM(push_events) / COUNT(*) AS pushes_per_hour,
+                       COUNT(*) AS hours_observed
                 FROM {G}.ecosystem_hourly GROUP BY 1
             )
             SELECT c.month,
@@ -198,7 +202,10 @@ OBSERVATORY = {
                         ELSE 'filtered feed (Jun 2025 on, OQ-1)' END AS regime
             FROM m c
             JOIN m p ON p.month = c.month - INTERVAL 12 MONTHS
-            WHERE NOT (c.month >= DATE'2025-06-01' AND p.month < DATE'2025-06-01')"""),
+            WHERE NOT (c.month >= DATE'2025-06-01' AND p.month < DATE'2025-06-01')
+              -- partial months bias the comparison (day-of-week mix):
+              -- require near-full coverage on both sides
+              AND c.hours_observed >= 600 AND p.hours_observed >= 600"""),
         dataset("production_hourly_stream", f"""
             SELECT event_hour, production_events, pr_merged, releases_published
             FROM {G}.ecosystem_hourly WHERE source = 'stream'"""),
