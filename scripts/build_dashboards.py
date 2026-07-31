@@ -74,7 +74,48 @@ def counter_enc(value):
     return {"value": {"fieldName": value, "displayName": value}}
 
 
+def text_widget(name, markdown, pos):
+    return {
+        "widget": {"name": name, "textbox_spec": markdown},
+        "position": {"x": pos[0], "y": pos[1], "width": pos[2], "height": pos[3]},
+    }
+
+
 # ---------------------------------------------------------------- observatory
+
+REGIME_NOTE = """\
+## How to read this observatory
+
+Everything here derives from GitHub's **public events feed** (via GH Archive
+and its BigQuery mirror). For a decade that feed was a **census** of public
+activity. Since mid-2025 it is not.
+
+**The regime change (OQ-1).** Starting **June 2025** (volume −26% in one
+month) with a second step in **October 2025**, most non-push event classes
+were progressively dropped or sampled upstream — by 2026 stars run at ~44/hr
+and PR events ~189/hr *for all of public GitHub*, which is implausibly low,
+while pushes kept flowing at realistic rates (push share rose 64% → 94%).
+Archive coverage was complete throughout, ruling out collection gaps: the
+*feed itself* was filtered. Who filters (GitHub's /events API vs archive
+collection) and by what rule is unresolved — tracked as **OQ-1**.
+
+**Reading rules**
+
+* **Full feed (thru May 2025)** — levels and trends are ecosystem facts.
+* **Filtered feed (Jun 2025 on)** — only **push-based** metrics are
+  trustworthy in absolute terms; star/fork/PR/issue numbers are a sample of
+  unknown coverage. Fine for movement *within* the regime; never compare
+  levels across the color boundary.
+* The bot-share "drop" at the boundary (~27% → ~9%) is the filter changing
+  the *measured mix*, not bots leaving — bots disproportionately emit the
+  filtered event types.
+
+**Provenance.** Rows are tagged by `source`: `bigquery` = decade import from
+the public dataset (census columns; deduped on event id); `stream` = our own
+hourly ingestion (2026-07 onward, full event detail). Stream rows always win
+on overlap. Jan–Jun 2026 is a known gap.
+"""
+
 
 OBSERVATORY = {
     "datasets": [
@@ -182,15 +223,16 @@ OBSERVATORY = {
             "name": "provenance",
             "displayName": "Read Me First — Data & Regimes",
             "layout": [
+                text_widget("regime_note", REGIME_NOTE, (0, 0, 6, 8)),
                 widget("push_share", "regime_monthly", "line",
                        "Push share — the feed-filtering signature (OQ-1: steps Jun + Oct 2025)",
                        line_enc("month", "push_share", color="regime"),
-                       (0, 0, 3, 7),
+                       (0, 8, 3, 7),
                        fields=[field("month"), field("push_share"), field("regime")]),
                 widget("coverage", "coverage_monthly", "bar",
                        "Hours observed per month, by source (gaps are archive outages)",
                        line_enc("month", "hours_observed", color="source"),
-                       (3, 0, 3, 7),
+                       (3, 8, 3, 7),
                        fields=[field("month"), field("hours_observed"), field("source")]),
             ],
         },

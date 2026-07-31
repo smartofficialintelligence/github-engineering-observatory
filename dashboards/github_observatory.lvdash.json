@@ -113,6 +113,18 @@
       "layout": [
         {
           "widget": {
+            "name": "regime_note",
+            "textbox_spec": "## How to read this observatory\n\nEverything here derives from GitHub's **public events feed** (via GH Archive\nand its BigQuery mirror). For a decade that feed was a **census** of public\nactivity. Since mid-2025 it is not.\n\n**The regime change (OQ-1).** Starting **June 2025** (volume \u221226% in one\nmonth) with a second step in **October 2025**, most non-push event classes\nwere progressively dropped or sampled upstream \u2014 by 2026 stars run at ~44/hr\nand PR events ~189/hr *for all of public GitHub*, which is implausibly low,\nwhile pushes kept flowing at realistic rates (push share rose 64% \u2192 94%).\nArchive coverage was complete throughout, ruling out collection gaps: the\n*feed itself* was filtered. Who filters (GitHub's /events API vs archive\ncollection) and by what rule is unresolved \u2014 tracked as **OQ-1**.\n\n**Reading rules**\n\n* **Full feed (thru May 2025)** \u2014 levels and trends are ecosystem facts.\n* **Filtered feed (Jun 2025 on)** \u2014 only **push-based** metrics are\n  trustworthy in absolute terms; star/fork/PR/issue numbers are a sample of\n  unknown coverage. Fine for movement *within* the regime; never compare\n  levels across the color boundary.\n* The bot-share \"drop\" at the boundary (~27% \u2192 ~9%) is the filter changing\n  the *measured mix*, not bots leaving \u2014 bots disproportionately emit the\n  filtered event types.\n\n**Provenance.** Rows are tagged by `source`: `bigquery` = decade import from\nthe public dataset (census columns; deduped on event id); `stream` = our own\nhourly ingestion (2026-07 onward, full event detail). Stream rows always win\non overlap. Jan\u2013Jun 2026 is a known gap.\n"
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 8
+          }
+        },
+        {
+          "widget": {
             "name": "push_share",
             "queries": [
               {
@@ -171,7 +183,7 @@
           },
           "position": {
             "x": 0,
-            "y": 0,
+            "y": 8,
             "width": 3,
             "height": 7
           }
@@ -236,7 +248,7 @@
           },
           "position": {
             "x": 3,
-            "y": 0,
+            "y": 8,
             "width": 3,
             "height": 7
           }
