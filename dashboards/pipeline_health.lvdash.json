@@ -1,0 +1,373 @@
+{
+  "datasets": [
+    {
+      "name": "freshness",
+      "displayName": "freshness",
+      "queryLines": [
+        "\n            SELECT MAX(event_hour) AS latest_stream_hour,\n                   CAST((unix_timestamp(current_timestamp())\n                         - unix_timestamp(MAX(event_hour))) / 3600.0 AS DECIMAL(6,1))\n                       AS hours_behind_now\n            FROM github_observatory.gold.ecosystem_hourly WHERE source = 'stream'"
+      ]
+    },
+    {
+      "name": "layer_counts",
+      "displayName": "layer_counts",
+      "queryLines": [
+        "\n            SELECT 'bronze.events_raw' AS layer, COUNT(*) AS rows\n            FROM github_observatory.bronze.events_raw\n            UNION ALL SELECT 'silver.events', COUNT(*) FROM github_observatory.silver.events\n            UNION ALL SELECT 'gold.ecosystem_hourly (stream)', COUNT(*)\n            FROM github_observatory.gold.ecosystem_hourly WHERE source = 'stream'\n            UNION ALL SELECT 'gold.ecosystem_hourly (bigquery)', COUNT(*)\n            FROM github_observatory.gold.ecosystem_hourly WHERE source = 'bigquery'\n            UNION ALL SELECT 'bronze.events_quarantine', COUNT(*)\n            FROM github_observatory.bronze.events_quarantine"
+      ]
+    },
+    {
+      "name": "dq",
+      "displayName": "dq",
+      "queryLines": [
+        "\n            SELECT source_hour, source_file, bronze_rows, silver_rows, parity_ok,\n                   quarantined, flagged, duplicate_event_ids\n            FROM github_observatory.gold.data_quality ORDER BY source_hour DESC LIMIT 200"
+      ]
+    },
+    {
+      "name": "dq_violations",
+      "displayName": "dq_violations",
+      "queryLines": [
+        "\n            SELECT COUNT(*) AS violations FROM github_observatory.gold.data_quality\n            WHERE NOT parity_ok OR duplicate_event_ids > 0"
+      ]
+    },
+    {
+      "name": "ingest_trend",
+      "displayName": "ingest_trend",
+      "queryLines": [
+        "\n            SELECT CAST(source_hour AS DATE) AS day,\n                   COUNT(*) AS files, SUM(bronze_rows) AS events\n            FROM github_observatory.gold.data_quality GROUP BY 1"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "health",
+      "displayName": "Pipeline Health",
+      "layout": [
+        {
+          "widget": {
+            "name": "violations",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "dq_violations",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "violations",
+                      "expression": "`violations`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "counter",
+              "frame": {
+                "title": "Data-quality violations (must be 0)",
+                "showTitle": true
+              },
+              "encodings": {
+                "value": {
+                  "fieldName": "violations",
+                  "displayName": "violations"
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 2,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "behind",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "freshness",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "latest_stream_hour",
+                      "expression": "`latest_stream_hour`"
+                    },
+                    {
+                      "name": "hours_behind_now",
+                      "expression": "`hours_behind_now`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "counter",
+              "frame": {
+                "title": "Hours behind now (publication lag \u2248 2h is normal)",
+                "showTitle": true
+              },
+              "encodings": {
+                "value": {
+                  "fieldName": "hours_behind_now",
+                  "displayName": "hours_behind_now"
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 0,
+            "width": 2,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "layers",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "layer_counts",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "layer",
+                      "expression": "`layer`"
+                    },
+                    {
+                      "name": "rows",
+                      "expression": "`rows`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "table",
+              "frame": {
+                "title": "Row counts by layer",
+                "showTitle": true
+              },
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "layer",
+                    "displayName": "layer",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ]
+                  },
+                  {
+                    "fieldName": "rows",
+                    "displayName": "rows",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 0,
+            "width": 2,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "ingest_volume",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ingest_trend",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "day",
+                      "expression": "`day`"
+                    },
+                    {
+                      "name": "events",
+                      "expression": "`events`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "frame": {
+                "title": "Events ingested per day",
+                "showTitle": true
+              },
+              "encodings": {
+                "x": {
+                  "fieldName": "day",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "day"
+                },
+                "y": {
+                  "fieldName": "events",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "events"
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 4,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "dq_table",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "dq",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "source_hour",
+                      "expression": "`source_hour`"
+                    },
+                    {
+                      "name": "source_file",
+                      "expression": "`source_file`"
+                    },
+                    {
+                      "name": "bronze_rows",
+                      "expression": "`bronze_rows`"
+                    },
+                    {
+                      "name": "silver_rows",
+                      "expression": "`silver_rows`"
+                    },
+                    {
+                      "name": "parity_ok",
+                      "expression": "`parity_ok`"
+                    },
+                    {
+                      "name": "quarantined",
+                      "expression": "`quarantined`"
+                    },
+                    {
+                      "name": "flagged",
+                      "expression": "`flagged`"
+                    },
+                    {
+                      "name": "duplicate_event_ids",
+                      "expression": "`duplicate_event_ids`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "table",
+              "frame": {
+                "title": "Per-file conservation checks (latest 200)",
+                "showTitle": true
+              },
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "source_hour",
+                    "displayName": "source_hour",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ]
+                  },
+                  {
+                    "fieldName": "source_file",
+                    "displayName": "source_file",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ]
+                  },
+                  {
+                    "fieldName": "bronze_rows",
+                    "displayName": "bronze_rows",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ]
+                  },
+                  {
+                    "fieldName": "silver_rows",
+                    "displayName": "silver_rows",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ]
+                  },
+                  {
+                    "fieldName": "parity_ok",
+                    "displayName": "parity_ok",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ]
+                  },
+                  {
+                    "fieldName": "quarantined",
+                    "displayName": "quarantined",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ]
+                  },
+                  {
+                    "fieldName": "flagged",
+                    "displayName": "flagged",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ]
+                  },
+                  {
+                    "fieldName": "duplicate_event_ids",
+                    "displayName": "duplicate_event_ids",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 10,
+            "width": 6,
+            "height": 10
+          }
+        }
+      ]
+    }
+  ]
+}

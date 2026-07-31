@@ -1,0 +1,936 @@
+{
+  "datasets": [
+    {
+      "name": "monthly_decade",
+      "displayName": "monthly_decade",
+      "queryLines": [
+        "\n            SELECT date_trunc('MONTH', event_hour) AS month, source,\n                   SUM(total_events) AS events,\n                   SUM(push_events) AS pushes,\n                   ROUND(SUM(bot_events) / SUM(total_events), 4) AS bot_share,\n                   ROUND(SUM(push_events) / SUM(total_events), 4) AS push_share,\n                   CAST(AVG(distinct_actors) AS BIGINT) AS avg_hourly_actors\n            FROM github_observatory.gold.ecosystem_hourly GROUP BY 1, 2"
+      ]
+    },
+    {
+      "name": "hourly_recent",
+      "displayName": "hourly_recent",
+      "queryLines": [
+        "\n            SELECT event_hour, total_events, push_events, production_events,\n                   bot_events, distinct_actors\n            FROM github_observatory.gold.ecosystem_hourly\n            WHERE source = 'stream'\n              AND event_hour >= current_timestamp() - INTERVAL 14 DAYS"
+      ]
+    },
+    {
+      "name": "velocity_recent",
+      "displayName": "velocity_recent",
+      "queryLines": [
+        "\n            SELECT event_hour, total_events, total_events_delta_24h,\n                   ROUND(total_events_pct_24h, 4) AS total_events_pct_24h\n            FROM github_observatory.gold.ecosystem_velocity\n            WHERE event_hour >= current_timestamp() - INTERVAL 14 DAYS"
+      ]
+    },
+    {
+      "name": "forecast_eval",
+      "displayName": "forecast_eval",
+      "queryLines": [
+        "\n            SELECT target, method, n_predictions, ROUND(mae, 1) AS mae,\n                   ROUND(smape, 4) AS smape, ROUND(mase, 3) AS mase,\n                   eval_start, eval_end\n            FROM github_observatory.gold.forecast_eval ORDER BY target, mase"
+      ]
+    },
+    {
+      "name": "forecast_fit",
+      "displayName": "forecast_fit",
+      "queryLines": [
+        "\n            SELECT event_hour, actual, prediction\n            FROM github_observatory.gold.forecast_predictions\n            WHERE target = 'total_events' AND method = 'seasonal_24h'"
+      ]
+    },
+    {
+      "name": "contribution",
+      "displayName": "contribution",
+      "queryLines": [
+        "\n            SELECT event_date, actors, new_actors,\n                   ROUND(top100_actor_share, 4) AS top100_actor_share,\n                   ROUND(bot_event_share, 4) AS bot_event_share\n            FROM github_observatory.gold.contribution_daily"
+      ]
+    },
+    {
+      "name": "retention",
+      "displayName": "retention",
+      "queryLines": [
+        "\n            SELECT event_date, active_actors, ROUND(retention_1d, 4) AS retention_1d,\n                   ROUND(retention_7d, 4) AS retention_7d\n            FROM github_observatory.gold.actor_retention_daily"
+      ]
+    },
+    {
+      "name": "network",
+      "displayName": "network",
+      "queryLines": [
+        "\n            SELECT event_date, ROUND(multi_repo_actor_share, 4) AS multi_repo_actor_share,\n                   ROUND(single_actor_repo_share, 4) AS single_actor_repo_share\n            FROM github_observatory.gold.network_daily"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "decade",
+      "displayName": "The Decade (2016\u2013present)",
+      "layout": [
+        {
+          "widget": {
+            "name": "bot_share_trend",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "monthly_decade",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "month",
+                      "expression": "`month`"
+                    },
+                    {
+                      "name": "bot_share",
+                      "expression": "`bot_share`"
+                    },
+                    {
+                      "name": "source",
+                      "expression": "`source`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "frame": {
+                "title": "Bot share of public GitHub events \u2014 the automation curve",
+                "showTitle": true
+              },
+              "encodings": {
+                "x": {
+                  "fieldName": "month",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "month"
+                },
+                "y": {
+                  "fieldName": "bot_share",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "bot_share"
+                },
+                "color": {
+                  "fieldName": "source",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "source"
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 8
+          }
+        },
+        {
+          "widget": {
+            "name": "volume_trend",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "monthly_decade",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "month",
+                      "expression": "`month`"
+                    },
+                    {
+                      "name": "events",
+                      "expression": "`events`"
+                    },
+                    {
+                      "name": "source",
+                      "expression": "`source`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "area",
+              "frame": {
+                "title": "Monthly event volume by source",
+                "showTitle": true
+              },
+              "encodings": {
+                "x": {
+                  "fieldName": "month",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "month"
+                },
+                "y": {
+                  "fieldName": "events",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "events"
+                },
+                "color": {
+                  "fieldName": "source",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "source"
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 8,
+            "width": 3,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "push_share_trend",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "monthly_decade",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "month",
+                      "expression": "`month`"
+                    },
+                    {
+                      "name": "push_share",
+                      "expression": "`push_share`"
+                    },
+                    {
+                      "name": "source",
+                      "expression": "`source`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "frame": {
+                "title": "Push share (2026 jump = OQ-1 feed filtering, not behavior)",
+                "showTitle": true
+              },
+              "encodings": {
+                "x": {
+                  "fieldName": "month",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "month"
+                },
+                "y": {
+                  "fieldName": "push_share",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "push_share"
+                },
+                "color": {
+                  "fieldName": "source",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "source"
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 8,
+            "width": 3,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "actors_trend",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "monthly_decade",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "month",
+                      "expression": "`month`"
+                    },
+                    {
+                      "name": "avg_hourly_actors",
+                      "expression": "`avg_hourly_actors`"
+                    },
+                    {
+                      "name": "source",
+                      "expression": "`source`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "frame": {
+                "title": "Avg distinct actors per hour",
+                "showTitle": true
+              },
+              "encodings": {
+                "x": {
+                  "fieldName": "month",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "month"
+                },
+                "y": {
+                  "fieldName": "avg_hourly_actors",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "avg_hourly_actors"
+                },
+                "color": {
+                  "fieldName": "source",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "source"
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 15,
+            "width": 6,
+            "height": 6
+          }
+        }
+      ]
+    },
+    {
+      "name": "live",
+      "displayName": "Live Stream & Forecast",
+      "layout": [
+        {
+          "widget": {
+            "name": "hourly_events",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "hourly_recent",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "event_hour",
+                      "expression": "`event_hour`"
+                    },
+                    {
+                      "name": "total_events",
+                      "expression": "`total_events`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "frame": {
+                "title": "Hourly events (stream, last 14 days)",
+                "showTitle": true
+              },
+              "encodings": {
+                "x": {
+                  "fieldName": "event_hour",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "event_hour"
+                },
+                "y": {
+                  "fieldName": "total_events",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "total_events"
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "hourly_mix",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "hourly_recent",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "event_hour",
+                      "expression": "`event_hour`"
+                    },
+                    {
+                      "name": "push_events",
+                      "expression": "`push_events`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "frame": {
+                "title": "Pushes vs production events",
+                "showTitle": true
+              },
+              "encodings": {
+                "x": {
+                  "fieldName": "event_hour",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "event_hour"
+                },
+                "y": {
+                  "fieldName": "push_events",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "push_events"
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 7,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "day_over_day",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "velocity_recent",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "event_hour",
+                      "expression": "`event_hour`"
+                    },
+                    {
+                      "name": "total_events_pct_24h",
+                      "expression": "`total_events_pct_24h`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "frame": {
+                "title": "24h acceleration (% vs same hour yesterday)",
+                "showTitle": true
+              },
+              "encodings": {
+                "x": {
+                  "fieldName": "event_hour",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "event_hour"
+                },
+                "y": {
+                  "fieldName": "total_events_pct_24h",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "total_events_pct_24h"
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 7,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "forecast_table",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "forecast_eval",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "target",
+                      "expression": "`target`"
+                    },
+                    {
+                      "name": "method",
+                      "expression": "`method`"
+                    },
+                    {
+                      "name": "n_predictions",
+                      "expression": "`n_predictions`"
+                    },
+                    {
+                      "name": "mae",
+                      "expression": "`mae`"
+                    },
+                    {
+                      "name": "smape",
+                      "expression": "`smape`"
+                    },
+                    {
+                      "name": "mase",
+                      "expression": "`mase`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "table",
+              "frame": {
+                "title": "Forecast leaderboard (MASE < 1 beats naive)",
+                "showTitle": true
+              },
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "target",
+                    "displayName": "target",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ]
+                  },
+                  {
+                    "fieldName": "method",
+                    "displayName": "method",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ]
+                  },
+                  {
+                    "fieldName": "n_predictions",
+                    "displayName": "n_predictions",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ]
+                  },
+                  {
+                    "fieldName": "mae",
+                    "displayName": "mae",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ]
+                  },
+                  {
+                    "fieldName": "smape",
+                    "displayName": "smape",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ]
+                  },
+                  {
+                    "fieldName": "mase",
+                    "displayName": "mase",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 13,
+            "width": 3,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "forecast_fit",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "forecast_fit",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "event_hour",
+                      "expression": "`event_hour`"
+                    },
+                    {
+                      "name": "actual",
+                      "expression": "`actual`"
+                    },
+                    {
+                      "name": "prediction",
+                      "expression": "`prediction`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "frame": {
+                "title": "seasonal_24h: prediction vs actual (total events)",
+                "showTitle": true
+              },
+              "encodings": {
+                "x": {
+                  "fieldName": "event_hour",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "event_hour"
+                },
+                "y": {
+                  "fieldName": "actual",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "actual"
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 13,
+            "width": 3,
+            "height": 7
+          }
+        }
+      ]
+    },
+    {
+      "name": "people",
+      "displayName": "Contribution & Structure",
+      "layout": [
+        {
+          "widget": {
+            "name": "actors_daily",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "contribution",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "event_date",
+                      "expression": "`event_date`"
+                    },
+                    {
+                      "name": "actors",
+                      "expression": "`actors`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "frame": {
+                "title": "Daily distinct actors (and new actors)",
+                "showTitle": true
+              },
+              "encodings": {
+                "x": {
+                  "fieldName": "event_date",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "event_date"
+                },
+                "y": {
+                  "fieldName": "actors",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "actors"
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "new_actors",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "contribution",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "event_date",
+                      "expression": "`event_date`"
+                    },
+                    {
+                      "name": "new_actors",
+                      "expression": "`new_actors`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "frame": {
+                "title": "New actors per day (relative to ingested history)",
+                "showTitle": true
+              },
+              "encodings": {
+                "x": {
+                  "fieldName": "event_date",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "event_date"
+                },
+                "y": {
+                  "fieldName": "new_actors",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "new_actors"
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 0,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "concentration",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "contribution",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "event_date",
+                      "expression": "`event_date`"
+                    },
+                    {
+                      "name": "top100_actor_share",
+                      "expression": "`top100_actor_share`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "frame": {
+                "title": "Top-100 actor share of daily events",
+                "showTitle": true
+              },
+              "encodings": {
+                "x": {
+                  "fieldName": "event_date",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "event_date"
+                },
+                "y": {
+                  "fieldName": "top100_actor_share",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "top100_actor_share"
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 6,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "retention_trend",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "retention",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "event_date",
+                      "expression": "`event_date`"
+                    },
+                    {
+                      "name": "retention_1d",
+                      "expression": "`retention_1d`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "frame": {
+                "title": "Actor retention (1-day)",
+                "showTitle": true
+              },
+              "encodings": {
+                "x": {
+                  "fieldName": "event_date",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "event_date"
+                },
+                "y": {
+                  "fieldName": "retention_1d",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "retention_1d"
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 6,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "network_trend",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "network",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "event_date",
+                      "expression": "`event_date`"
+                    },
+                    {
+                      "name": "multi_repo_actor_share",
+                      "expression": "`multi_repo_actor_share`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "frame": {
+                "title": "Multi-repo actor share (cross-repo connectivity)",
+                "showTitle": true
+              },
+              "encodings": {
+                "x": {
+                  "fieldName": "event_date",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "event_date"
+                },
+                "y": {
+                  "fieldName": "multi_repo_actor_share",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "multi_repo_actor_share"
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 12,
+            "width": 6,
+            "height": 6
+          }
+        }
+      ]
+    }
+  ]
+}

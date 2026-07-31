@@ -219,6 +219,52 @@ def cmd_run_notebook(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_deploy_dashboard(args: argparse.Namespace) -> int:
+    """Create or update an AI/BI dashboard from a .lvdash.json file,
+    then publish it with embedded credentials."""
+    with open(args.file, encoding="utf-8") as fh:
+        serialized = fh.read()
+    display_name = (
+        os.path.basename(args.file)
+        .removesuffix(".lvdash.json")
+        .replace("_", " ")
+        .title()
+    )
+    warehouse = api("GET", "/api/2.0/sql/warehouses")["warehouses"][0]
+
+    existing = None
+    resp = api("GET", "/api/2.0/lakeview/dashboards", query={"page_size": 100})
+    for d in resp.get("dashboards", []):
+        if d.get("display_name") == display_name:
+            existing = d
+            break
+
+    body = {
+        "display_name": display_name,
+        "serialized_dashboard": serialized,
+        "warehouse_id": warehouse["id"],
+    }
+    if existing:
+        dash = api(
+            "PATCH", f"/api/2.0/lakeview/dashboards/{existing['dashboard_id']}", body
+        )
+        print(f"updated dashboard {display_name} ({dash['dashboard_id']})")
+    else:
+        user = whoami()
+        body["parent_path"] = f"/Workspace/Users/{user}"
+        dash = api("POST", "/api/2.0/lakeview/dashboards", body)
+        print(f"created dashboard {display_name} ({dash['dashboard_id']})")
+
+    api(
+        "POST",
+        f"/api/2.0/lakeview/dashboards/{dash['dashboard_id']}/published",
+        {"embed_credentials": True, "warehouse_id": warehouse["id"]},
+    )
+    host, _ = _credentials()
+    print(f"published: {host}/sql/dashboardsv3/{dash['dashboard_id']}/published")
+    return 0
+
+
 PIPELINE_JOB_NAME = "github-observatory-hourly-refresh"
 
 
@@ -317,6 +363,11 @@ def main(argv: list[str] | None = None) -> int:
         help="register the schedule paused (activate later in the UI)",
     )
 
+    p_dash = sub.add_parser(
+        "deploy-dashboard", help="create/update + publish an AI/BI dashboard"
+    )
+    p_dash.add_argument("file", help="path to a .lvdash.json definition")
+
     args = parser.parse_args(argv)
     handler = {
         "check": cmd_check,
@@ -324,6 +375,7 @@ def main(argv: list[str] | None = None) -> int:
         "run-notebook": cmd_run_notebook,
         "upload": cmd_upload,
         "create-job": cmd_create_job,
+        "deploy-dashboard": cmd_deploy_dashboard,
     }[args.command]
     try:
         return handler(args)
