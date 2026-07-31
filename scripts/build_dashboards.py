@@ -84,8 +84,11 @@ OBSERVATORY = {
                    SUM(push_events) AS pushes,
                    ROUND(SUM(bot_events) / SUM(total_events), 4) AS bot_share,
                    ROUND(SUM(push_events) / SUM(total_events), 4) AS push_share,
-                   CAST(AVG(distinct_actors) AS BIGINT) AS avg_hourly_actors
-            FROM {G}.ecosystem_hourly GROUP BY 1, 2"""),
+                   CAST(AVG(distinct_actors) AS BIGINT) AS avg_hourly_actors,
+                   CASE WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01'
+                        THEN 'full feed (thru May 2025)'
+                        ELSE 'filtered feed (Jun 2025 on, OQ-1)' END AS regime
+            FROM {G}.ecosystem_hourly GROUP BY 1, 2, 4"""),
         dataset("monthly_actor_kind", f"""
             -- Coverage-normalized: avg events per observed hour, so months
             -- with archive gaps (2016/2018 outages, partial 2026) show
@@ -142,8 +145,8 @@ OBSERVATORY = {
             "layout": [
                 widget("bot_share_trend", "monthly_decade", "line",
                        "Bot share of public GitHub events — the automation curve",
-                       line_enc("month", "bot_share", color="source"),
-                       (0, 0, 6, 8), fields=[field("month"), field("bot_share"), field("source")]),
+                       line_enc("month", "bot_share", color="regime"),
+                       (0, 0, 6, 8), fields=[field("month"), field("bot_share"), field("regime")]),
                 widget("volume_stacked", "monthly_actor_kind", "area",
                        "Avg events per hour — humans vs bots (coverage-normalized)",
                        line_enc("month", "events_per_hour", color="actor_kind"),
@@ -151,9 +154,9 @@ OBSERVATORY = {
                        fields=[field("month"), field("events_per_hour"),
                                field("actor_kind")]),
                 widget("push_share_trend", "monthly_decade", "line",
-                       "Push share (2026 jump = OQ-1 feed filtering, not behavior)",
-                       line_enc("month", "push_share", color="source"),
-                       (3, 8, 3, 7), fields=[field("month"), field("push_share"), field("source")]),
+                       "Push share — the filtering signature (steps up from Jun 2025)",
+                       line_enc("month", "push_share", color="regime"),
+                       (3, 8, 3, 7), fields=[field("month"), field("push_share"), field("regime")]),
                 widget("actors_trend", "monthly_decade", "line",
                        "Avg distinct actors per hour",
                        line_enc("month", "avg_hourly_actors", color="source"),

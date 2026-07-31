@@ -4,7 +4,7 @@
       "name": "monthly_decade",
       "displayName": "monthly_decade",
       "queryLines": [
-        "\n            SELECT date_trunc('MONTH', event_hour) AS month, source,\n                   SUM(total_events) AS events,\n                   SUM(push_events) AS pushes,\n                   ROUND(SUM(bot_events) / SUM(total_events), 4) AS bot_share,\n                   ROUND(SUM(push_events) / SUM(total_events), 4) AS push_share,\n                   CAST(AVG(distinct_actors) AS BIGINT) AS avg_hourly_actors\n            FROM github_observatory.gold.ecosystem_hourly GROUP BY 1, 2"
+        "\n            SELECT date_trunc('MONTH', event_hour) AS month, source,\n                   SUM(total_events) AS events,\n                   SUM(push_events) AS pushes,\n                   ROUND(SUM(bot_events) / SUM(total_events), 4) AS bot_share,\n                   ROUND(SUM(push_events) / SUM(total_events), 4) AS push_share,\n                   CAST(AVG(distinct_actors) AS BIGINT) AS avg_hourly_actors,\n                   CASE WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01'\n                        THEN 'full feed (thru May 2025)'\n                        ELSE 'filtered feed (Jun 2025 on, OQ-1)' END AS regime\n            FROM github_observatory.gold.ecosystem_hourly GROUP BY 1, 2, 4"
       ]
     },
     {
@@ -88,8 +88,8 @@
                       "expression": "`bot_share`"
                     },
                     {
-                      "name": "source",
-                      "expression": "`source`"
+                      "name": "regime",
+                      "expression": "`regime`"
                     }
                   ]
                 }
@@ -118,11 +118,11 @@
                   "displayName": "bot_share"
                 },
                 "color": {
-                  "fieldName": "source",
+                  "fieldName": "regime",
                   "scale": {
                     "type": "categorical"
                   },
-                  "displayName": "source"
+                  "displayName": "regime"
                 }
               }
             }
@@ -218,8 +218,8 @@
                       "expression": "`push_share`"
                     },
                     {
-                      "name": "source",
-                      "expression": "`source`"
+                      "name": "regime",
+                      "expression": "`regime`"
                     }
                   ]
                 }
@@ -229,7 +229,7 @@
               "version": 3,
               "widgetType": "line",
               "frame": {
-                "title": "Push share (2026 jump = OQ-1 feed filtering, not behavior)",
+                "title": "Push share \u2014 the filtering signature (steps up from Jun 2025)",
                 "showTitle": true
               },
               "encodings": {
@@ -248,11 +248,11 @@
                   "displayName": "push_share"
                 },
                 "color": {
-                  "fieldName": "source",
+                  "fieldName": "regime",
                   "scale": {
                     "type": "categorical"
                   },
-                  "displayName": "source"
+                  "displayName": "regime"
                 }
               }
             }
