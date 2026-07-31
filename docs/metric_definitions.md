@@ -1,8 +1,30 @@
 # Metric Definitions
 
-**Version: 2** (2026-07-30). Any change to a definition below requires a
+**Version: 3** (2026-07-30). Any change to a definition below requires a
 version bump here and a note in the changelog table at the bottom;
 metrics computed under different versions must not be compared silently.
+
+## Sources and provenance (v3)
+
+`gold.ecosystem_hourly.source` identifies how a row was computed:
+
+* `stream` — aggregated by our pipeline from ingested events
+  (`silver.events`); all columns populated.
+* `bigquery` — deep history (2016–2025) imported from the BigQuery
+  public `githubarchive` dataset via `bronze.bq_ecosystem_hourly`
+  (raw-as-received for that source, with job id / query sha
+  provenance). Only **census columns** are populated: `total_events`,
+  `push_events`, `bot_events`, the `_human` variants, and distinct
+  actor/repo counts. Payload-derived columns (`production_events`,
+  `pr_*`, `issues_*`, `releases_published`) are NULL — pass 1 of the
+  import deliberately avoids the payload column for cost; a future
+  pass 2 fills them with era-aware derivations.
+
+**Precedence: stream wins.** The history merge never modifies a
+`stream` row; a stream rebuild may overwrite a `bigquery` row.
+**Dedup rule extends to BigQuery**: the public dataset contains
+duplicate events, so all imported counts are `COUNT(DISTINCT id)`
+(validated 72/72 hours exact against stream Gold on 2026-07-27→29).
 
 These definitions bind the Gold layer. They resolve OQ-7 (production
 event whitelist) and adopt the v1 assumption for OQ-2; both remain
@@ -176,3 +198,4 @@ open in OQ-12.
 | --- | --- | --- |
 | 1 | 2026-07-30 | Initial definitions; OQ-7 whitelist v1; OQ-2 v1 assumption (`closed` = closed-without-merge) |
 | 2 | 2026-07-30 | Added flow, contribution, engagement, data-quality, retention, network, and forecasting definitions (steps 8–10) |
+| 3 | 2026-07-30 | `source` column + stream-wins precedence; BigQuery deep-history import (census columns 2016–2025, payload columns NULL); COUNT(DISTINCT id) rule for imported data |

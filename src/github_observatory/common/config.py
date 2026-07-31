@@ -27,6 +27,9 @@ EVENTS_RAW_TABLE = f"{BRONZE_SCHEMA}.events_raw"
 EVENTS_QUARANTINE_TABLE = f"{BRONZE_SCHEMA}.events_quarantine"
 INGESTION_AUDIT_TABLE = f"{BRONZE_SCHEMA}.ingestion_audit"
 SCHEMA_PROFILE_TABLE = f"{BRONZE_SCHEMA}.schema_profile"
+# Deep-history aggregates imported from the BigQuery public dataset
+# (raw-as-received for that source; see ingestion/bq_history.py).
+BQ_ECOSYSTEM_HOURLY_TABLE = f"{BRONZE_SCHEMA}.bq_ecosystem_hourly"
 
 # Silver tables
 SILVER_EVENTS_TABLE = f"{SILVER_SCHEMA}.events"

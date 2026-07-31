@@ -41,6 +41,8 @@ src/github_observatory/
   common/config.py        Unity Catalog names, source URL template
   ingestion/download_gharchive.py   idempotent hourly downloader + audit log
   ingestion/bronze_ingest.py        raw files → bronze.events_raw/quarantine/audit
+  ingestion/bq_history.py           BigQuery decade aggregates → bronze.bq_ecosystem_hourly
+                                    → gold (source='bigquery', stream wins)
   schema/profile_schema.py          stream schema profiler + Delta writer
   silver/transforms.py              Bronze → silver.events + lifecycle tables
                                     (MERGE SQL builders — the single implementation)
@@ -59,10 +61,14 @@ notebooks/
   06_behavior_build.py              behavior/sustainability/DQ build + checks
   07_forecast.py                    forecast eval + MLflow + next-hour
   08_hourly_pipeline.py             schedulable end-to-end hourly refresh
+  09_bq_history_import.py           land + merge the 2016–2025 deep history
   exploration/                      original catalog/volume setup notebooks
 scripts/
   databricks_run.py                 sync repo into workspace, run notebooks
                                     on serverless via REST (stdlib only)
+  bq_export_hourly.py               decade census export from the BigQuery
+                                    public dataset (COUNT DISTINCT id; free tier)
+artifacts/bq_import/                committed per-year CSVs + provenance manifest
 docs/
   current_state.md                  repo/infra audit (Task 1)
   schema_validation_report.md       empirical schema findings (Task 3)

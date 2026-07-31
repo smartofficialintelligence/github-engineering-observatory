@@ -42,7 +42,7 @@ PRODUCTION_EVENTS: dict[str, tuple[str, ...] | None] = {
     "ReleaseEvent": ("published",),
 }
 
-METRIC_DEFINITIONS_VERSION = 2
+METRIC_DEFINITIONS_VERSION = 3
 
 ECOSYSTEM_HOURLY_DDL = (
     "event_hour TIMESTAMP, "
@@ -56,7 +56,8 @@ ECOSYSTEM_HOURLY_DDL = (
     "bot_events BIGINT, "
     "distinct_actors BIGINT, distinct_actors_human BIGINT, "
     "distinct_repos BIGINT, distinct_push_repos BIGINT, "
-    "metric_version INT, gold_run_id STRING, gold_built_at TIMESTAMP"
+    "metric_version INT, gold_run_id STRING, gold_built_at TIMESTAMP, "
+    "source STRING"
 )
 
 
@@ -103,7 +104,8 @@ SELECT
     COUNT(DISTINCT CASE WHEN event_type = 'PushEvent' THEN repo_id END) AS distinct_push_repos,
     {METRIC_DEFINITIONS_VERSION} AS metric_version,
     '{run_id}' AS gold_run_id,
-    current_timestamp() AS gold_built_at
+    current_timestamp() AS gold_built_at,
+    'stream' AS source
 FROM {SILVER_EVENTS_TABLE}
 WHERE quality_flag IS NULL
   AND created_at IS NOT NULL
@@ -151,10 +153,22 @@ def ecosystem_velocity_view_sql() -> str:
 
 
 def create_gold_tables(spark: Any) -> None:
-    """Create the Gold table and (re)create the velocity view."""
+    """Create the Gold table and (re)create the velocity view.
+
+    Also migrates pre-v3 tables in place: adds the ``source`` column and
+    backfills existing rows as 'stream' (all pre-v3 rows were
+    stream-computed).
+    """
     spark.sql(
         f"CREATE TABLE IF NOT EXISTS {GOLD_ECOSYSTEM_HOURLY_TABLE} "
         f"({ECOSYSTEM_HOURLY_DDL}) USING DELTA"
+    )
+    columns = {f.name for f in spark.table(GOLD_ECOSYSTEM_HOURLY_TABLE).schema.fields}
+    if "source" not in columns:
+        spark.sql(f"ALTER TABLE {GOLD_ECOSYSTEM_HOURLY_TABLE} ADD COLUMNS (source STRING)")
+        logger.info("added source column to %s", GOLD_ECOSYSTEM_HOURLY_TABLE)
+    spark.sql(
+        f"UPDATE {GOLD_ECOSYSTEM_HOURLY_TABLE} SET source = 'stream' WHERE source IS NULL"
     )
     spark.sql(ecosystem_velocity_view_sql())
 
