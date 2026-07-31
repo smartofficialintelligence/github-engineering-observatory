@@ -11,7 +11,7 @@
       "name": "regime_monthly",
       "displayName": "regime_monthly",
       "queryLines": [
-        "\n            SELECT date_trunc('MONTH', event_hour) AS month,\n                   ROUND(SUM(push_events) / SUM(total_events), 4) AS push_share,\n                   ROUND(SUM(bot_events) / SUM(total_events), 4) AS bot_share,\n                   CASE WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01'\n                        THEN 'full feed (thru May 2025)'\n                        ELSE 'filtered feed (Jun 2025 on, OQ-1)' END AS regime\n            FROM github_observatory.gold.ecosystem_hourly GROUP BY 1, 4"
+        "\n            SELECT date_trunc('MONTH', event_hour) AS month,\n                   ROUND(SUM(push_events) / SUM(total_events), 4) AS push_share,\n                   CASE WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01'\n                        THEN 'full feed (thru May 2025)'\n                        ELSE 'filtered feed (Jun 2025 on, OQ-1)' END AS regime\n            FROM github_observatory.gold.ecosystem_hourly GROUP BY 1, 3"
       ]
     },
     {
@@ -22,45 +22,38 @@
       ]
     },
     {
-      "name": "production_daily",
-      "displayName": "production_daily",
-      "queryLines": [
-        "\n            SELECT CAST(event_hour AS DATE) AS day,\n                   SUM(production_events) AS production_events,\n                   SUM(pr_opened) AS pr_opened, SUM(pr_merged) AS pr_merged,\n                   SUM(issues_opened) AS issues_opened,\n                   SUM(issues_closed) AS issues_closed,\n                   SUM(releases_published) AS releases_published\n            FROM github_observatory.gold.ecosystem_hourly WHERE source = 'stream' GROUP BY 1"
-      ]
-    },
-    {
       "name": "production_yoy",
       "displayName": "production_yoy",
       "queryLines": [
-        "\n            WITH m AS (\n                SELECT date_trunc('MONTH', event_hour) AS month,\n                       SUM(push_events) / COUNT(*) AS pushes_per_hour\n                FROM github_observatory.gold.ecosystem_hourly GROUP BY 1\n            )\n            SELECT c.month,\n                   ROUND((c.pushes_per_hour - p.pushes_per_hour)\n                         / p.pushes_per_hour, 4) AS yoy_growth,\n                   CASE WHEN c.month < DATE'2025-06-01'\n                        THEN 'full feed (thru May 2025)'\n                        ELSE 'filtered feed (Jun 2025 on, OQ-1)' END AS regime\n            FROM m c\n            JOIN m p ON p.month = c.month - INTERVAL 12 MONTHS\n            -- a YoY spanning the regime boundary measures the filter,\n            -- not production: exclude it\n            WHERE NOT (c.month >= DATE'2025-06-01' AND p.month < DATE'2025-06-01')"
+        "\n            WITH m AS (\n                SELECT date_trunc('MONTH', event_hour) AS month,\n                       SUM(push_events) / COUNT(*) AS pushes_per_hour\n                FROM github_observatory.gold.ecosystem_hourly GROUP BY 1\n            )\n            SELECT c.month,\n                   ROUND((c.pushes_per_hour - p.pushes_per_hour)\n                         / p.pushes_per_hour, 4) AS yoy_growth,\n                   CASE WHEN c.month < DATE'2025-06-01'\n                        THEN 'full feed (thru May 2025)'\n                        ELSE 'filtered feed (Jun 2025 on, OQ-1)' END AS regime\n            FROM m c\n            JOIN m p ON p.month = c.month - INTERVAL 12 MONTHS\n            WHERE NOT (c.month >= DATE'2025-06-01' AND p.month < DATE'2025-06-01')"
       ]
     },
     {
-      "name": "flow",
-      "displayName": "flow",
+      "name": "production_hourly_stream",
+      "displayName": "production_hourly_stream",
       "queryLines": [
-        "\n            SELECT event_date, hours_observed,\n                   ROUND(production_cv, 4) AS cv,\n                   ROUND(production_fano, 2) AS fano,\n                   ROUND(production_burstiness, 4) AS burstiness,\n                   ROUND(production_hourly_entropy, 4) AS entropy\n            FROM github_observatory.gold.flow_daily WHERE hours_observed = 24"
+        "\n            SELECT event_hour, production_events, pr_merged, releases_published\n            FROM github_observatory.gold.ecosystem_hourly WHERE source = 'stream'"
       ]
     },
     {
-      "name": "rework_daily",
-      "displayName": "rework_daily",
+      "name": "flow_decade",
+      "displayName": "flow_decade",
       "queryLines": [
-        "\n            SELECT CAST(event_hour AS DATE) AS day,\n                   ROUND(try_divide(SUM(pr_reopened), SUM(pr_opened)), 4)\n                       AS pr_reopen_rate,\n                   ROUND(try_divide(SUM(issues_reopened), SUM(issues_opened)), 4)\n                       AS issue_reopen_rate,\n                   ROUND(try_divide(SUM(pr_closed_no_merge),\n                                    SUM(pr_closed_no_merge) + SUM(pr_merged)), 4)\n                       AS pr_closed_without_merge_rate\n            FROM github_observatory.gold.ecosystem_hourly WHERE source = 'stream' GROUP BY 1"
+        "\n            WITH daily AS (\n                SELECT CAST(event_hour AS DATE) AS day,\n                       COUNT(*) AS hrs,\n                       AVG(push_events) AS mean,\n                       STDDEV_POP(push_events) AS std,\n                       SUM(push_events) AS tot\n                FROM github_observatory.gold.ecosystem_hourly GROUP BY 1\n            ),\n            entropy AS (\n                SELECT CAST(e.event_hour AS DATE) AS day,\n                       -SUM(CASE WHEN e.push_events > 0 AND d.tot > 0\n                                 THEN (e.push_events / d.tot)\n                                      * ln(e.push_events / d.tot)\n                                 ELSE 0.0 END) AS ent\n                FROM github_observatory.gold.ecosystem_hourly e\n                JOIN daily d ON CAST(e.event_hour AS DATE) = d.day\n                GROUP BY 1\n            )\n            SELECT date_trunc('MONTH', d.day) AS month,\n                   ROUND(AVG(try_divide(d.std, d.mean)), 4) AS cv,\n                   ROUND(AVG(try_divide(d.std - d.mean, d.std + d.mean)), 4)\n                       AS burstiness,\n                   ROUND(AVG(e.ent), 4) AS entropy,\n                   CASE WHEN date_trunc('MONTH', d.day) < DATE'2025-06-01'\n                        THEN 'full feed (thru May 2025)'\n                        ELSE 'filtered feed (Jun 2025 on, OQ-1)' END AS regime\n            FROM daily d JOIN entropy e USING (day)\n            WHERE d.hrs = 24\n            GROUP BY 1, 5"
       ]
     },
     {
-      "name": "review_outcomes",
-      "displayName": "review_outcomes",
+      "name": "rework_hourly",
+      "displayName": "rework_hourly",
       "queryLines": [
-        "\n            SELECT CAST(created_at AS DATE) AS day, review_state,\n                   COUNT(*) AS reviews\n            FROM github_observatory.silver.review_events GROUP BY 1, 2"
+        "\n            SELECT event_hour, pr_reopened, issues_reopened,\n                   pr_closed_no_merge, pr_merged\n            FROM github_observatory.gold.ecosystem_hourly WHERE source = 'stream'"
       ]
     },
     {
-      "name": "contribution",
-      "displayName": "contribution",
+      "name": "review_hourly",
+      "displayName": "review_hourly",
       "queryLines": [
-        "\n            SELECT event_date, actors, actors_human, new_actors,\n                   ROUND(top100_actor_share, 4) AS top100_actor_share,\n                   ROUND(bot_event_share, 4) AS bot_event_share,\n                   events_per_actor_p50, events_per_actor_p90, events_per_actor_p99\n            FROM github_observatory.gold.contribution_daily"
+        "\n            SELECT date_trunc('HOUR', created_at) AS event_hour, review_state,\n                   COUNT(*) AS reviews\n            FROM github_observatory.silver.review_events GROUP BY 1, 2"
       ]
     },
     {
@@ -71,10 +64,24 @@
       ]
     },
     {
-      "name": "engagement",
-      "displayName": "engagement",
+      "name": "actors_decade",
+      "displayName": "actors_decade",
       "queryLines": [
-        "\n            SELECT event_date, stars, forks, distinct_starred_repos,\n                   distinct_forked_repos\n            FROM github_observatory.gold.engagement_daily"
+        "\n            SELECT date_trunc('MONTH', event_hour) AS month,\n                   CAST(AVG(distinct_actors) AS BIGINT) AS avg_hourly_actors,\n                   CAST(AVG(distinct_actors_human) AS BIGINT)\n                       AS avg_hourly_actors_human,\n                   CASE WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01'\n                        THEN 'full feed (thru May 2025)'\n                        ELSE 'filtered feed (Jun 2025 on, OQ-1)' END AS regime\n            FROM github_observatory.gold.ecosystem_hourly GROUP BY 1, 4"
+      ]
+    },
+    {
+      "name": "contribution",
+      "displayName": "contribution",
+      "queryLines": [
+        "\n            SELECT event_date, new_actors,\n                   ROUND(top100_actor_share, 4) AS top100_actor_share,\n                   events_per_actor_p50, events_per_actor_p90, events_per_actor_p99\n            FROM github_observatory.gold.contribution_daily"
+      ]
+    },
+    {
+      "name": "engagement_hourly",
+      "displayName": "engagement_hourly",
+      "queryLines": [
+        "\n            SELECT date_trunc('HOUR', created_at) AS event_hour,\n                   COUNT_IF(event_type = 'WatchEvent') AS stars,\n                   COUNT_IF(event_type = 'ForkEvent') AS forks\n            FROM github_observatory.silver.events\n            WHERE quality_flag IS NULL AND created_at IS NOT NULL\n              AND event_type IN ('WatchEvent', 'ForkEvent')\n            GROUP BY 1"
       ]
     },
     {
@@ -88,7 +95,7 @@
       "name": "network",
       "displayName": "network",
       "queryLines": [
-        "\n            SELECT event_date,\n                   ROUND(multi_repo_actor_share, 4) AS multi_repo_actor_share,\n                   ROUND(single_actor_repo_share, 4) AS single_actor_repo_share,\n                   ROUND(repos_per_actor_avg, 3) AS repos_per_actor_avg,\n                   ROUND(actors_per_repo_avg, 3) AS actors_per_repo_avg\n            FROM github_observatory.gold.network_daily"
+        "\n            SELECT event_date,\n                   ROUND(multi_repo_actor_share, 4) AS multi_repo_actor_share,\n                   ROUND(single_actor_repo_share, 4) AS single_actor_repo_share\n            FROM github_observatory.gold.network_daily"
       ]
     },
     {
@@ -102,7 +109,7 @@
       "name": "forecast_fit",
       "displayName": "forecast_fit",
       "queryLines": [
-        "\n            SELECT event_hour, actual, prediction\n            FROM github_observatory.gold.forecast_predictions\n            WHERE target = 'total_events' AND method = 'seasonal_24h'"
+        "\n            SELECT event_hour, actual, prediction\n            FROM github_observatory.gold.forecast_predictions\n            WHERE target = 'total_events' AND method = 'seasonal_24h'\n              AND event_hour >= current_timestamp() - INTERVAL 30 DAYS"
       ]
     }
   ],
@@ -153,7 +160,7 @@
               "version": 3,
               "widgetType": "line",
               "frame": {
-                "title": "Push share \u2014 the feed-filtering signature (OQ-1: steps Jun + Oct 2025)",
+                "title": "Push share \u2014 the feed-filtering signature (OQ-1)",
                 "showTitle": true
               },
               "encodings": {
@@ -218,7 +225,7 @@
               "version": 3,
               "widgetType": "bar",
               "frame": {
-                "title": "Hours observed per month, by source (gaps are archive outages)",
+                "title": "Hours observed per month, by source (gaps = archive outages)",
                 "showTitle": true
               },
               "encodings": {
@@ -320,62 +327,8 @@
           "position": {
             "x": 0,
             "y": 0,
-            "width": 6,
-            "height": 7
-          }
-        },
-        {
-          "widget": {
-            "name": "prod_daily",
-            "queries": [
-              {
-                "name": "main_query",
-                "query": {
-                  "datasetName": "production_daily",
-                  "disaggregated": false,
-                  "fields": [
-                    {
-                      "name": "day",
-                      "expression": "`day`"
-                    },
-                    {
-                      "name": "production_events",
-                      "expression": "`production_events`"
-                    }
-                  ]
-                }
-              }
-            ],
-            "spec": {
-              "version": 3,
-              "widgetType": "bar",
-              "frame": {
-                "title": "Daily production events (stream; OQ-7 whitelist)",
-                "showTitle": true
-              },
-              "encodings": {
-                "x": {
-                  "fieldName": "day",
-                  "scale": {
-                    "type": "temporal"
-                  },
-                  "displayName": "day"
-                },
-                "y": {
-                  "fieldName": "production_events",
-                  "scale": {
-                    "type": "quantitative"
-                  },
-                  "displayName": "production_events"
-                }
-              }
-            }
-          },
-          "position": {
-            "x": 0,
-            "y": 7,
             "width": 3,
-            "height": 6
+            "height": 7
           }
         },
         {
@@ -408,7 +361,7 @@
               "version": 3,
               "widgetType": "bar",
               "frame": {
-                "title": "Production acceleration: YoY growth of pushes/hour (cross-regime YoY excluded)",
+                "title": "Acceleration: YoY growth of pushes/hour (cross-regime excluded)",
                 "showTitle": true
               },
               "encodings": {
@@ -438,32 +391,40 @@
           },
           "position": {
             "x": 3,
-            "y": 7,
+            "y": 0,
             "width": 3,
-            "height": 6
+            "height": 7
           }
         },
         {
           "widget": {
-            "name": "lifecycle_daily",
+            "name": "prod_note",
+            "textbox_spec": "**Stream-only tiles below (hourly grain):** `production_events`, PR and release detail are payload-derived \u2014 historical values await the **pass-2 payload backfill**. Until then these tiles cover only the stream era (2026-07\u2192) and validate plumbing more than they measure the ecosystem."
+          },
+          "position": {
+            "x": 0,
+            "y": 7,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "prod_hourly",
             "queries": [
               {
                 "name": "main_query",
                 "query": {
-                  "datasetName": "production_daily",
+                  "datasetName": "production_hourly_stream",
                   "disaggregated": false,
                   "fields": [
                     {
-                      "name": "day",
-                      "expression": "`day`"
+                      "name": "event_hour",
+                      "expression": "`event_hour`"
                     },
                     {
-                      "name": "pr_merged",
-                      "expression": "`pr_merged`"
-                    },
-                    {
-                      "name": "releases_published",
-                      "expression": "`releases_published`"
+                      "name": "production_events",
+                      "expression": "`production_events`"
                     }
                   ]
                 }
@@ -473,16 +434,70 @@
               "version": 3,
               "widgetType": "line",
               "frame": {
-                "title": "PR merges and releases per day (stream)",
+                "title": "Production events per hour (stream era)",
                 "showTitle": true
               },
               "encodings": {
                 "x": {
-                  "fieldName": "day",
+                  "fieldName": "event_hour",
                   "scale": {
                     "type": "temporal"
                   },
-                  "displayName": "day"
+                  "displayName": "event_hour"
+                },
+                "y": {
+                  "fieldName": "production_events",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "production_events"
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 9,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "lifecycle_hourly",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "production_hourly_stream",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "event_hour",
+                      "expression": "`event_hour`"
+                    },
+                    {
+                      "name": "pr_merged",
+                      "expression": "`pr_merged`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "frame": {
+                "title": "PR merges per hour (stream era)",
+                "showTitle": true
+              },
+              "encodings": {
+                "x": {
+                  "fieldName": "event_hour",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "event_hour"
                 },
                 "y": {
                   "fieldName": "pr_merged",
@@ -495,9 +510,9 @@
             }
           },
           "position": {
-            "x": 0,
-            "y": 13,
-            "width": 6,
+            "x": 3,
+            "y": 9,
+            "width": 3,
             "height": 6
           }
         }
@@ -509,21 +524,37 @@
       "layout": [
         {
           "widget": {
+            "name": "flow_note",
+            "textbox_spec": "Flow is computed here from **census push counts**, so the full decade is available now (full-coverage days only, monthly averages of daily statistics). The gold `flow_daily` table (production-based) will extend historically after the pass-2 payload backfill. OQ-9: which candidate becomes the primary Flow metric is still open."
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
             "name": "flow_burstiness",
             "queries": [
               {
                 "name": "main_query",
                 "query": {
-                  "datasetName": "flow",
+                  "datasetName": "flow_decade",
                   "disaggregated": false,
                   "fields": [
                     {
-                      "name": "event_date",
-                      "expression": "`event_date`"
+                      "name": "month",
+                      "expression": "`month`"
                     },
                     {
                       "name": "burstiness",
                       "expression": "`burstiness`"
+                    },
+                    {
+                      "name": "regime",
+                      "expression": "`regime`"
                     }
                   ]
                 }
@@ -533,16 +564,16 @@
               "version": 3,
               "widgetType": "line",
               "frame": {
-                "title": "Burstiness of hourly production, full days (OQ-9 candidate)",
+                "title": "Burstiness of hourly pushes \u2014 monthly avg of daily values",
                 "showTitle": true
               },
               "encodings": {
                 "x": {
-                  "fieldName": "event_date",
+                  "fieldName": "month",
                   "scale": {
                     "type": "temporal"
                   },
-                  "displayName": "event_date"
+                  "displayName": "month"
                 },
                 "y": {
                   "fieldName": "burstiness",
@@ -550,15 +581,22 @@
                     "type": "quantitative"
                   },
                   "displayName": "burstiness"
+                },
+                "color": {
+                  "fieldName": "regime",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "regime"
                 }
               }
             }
           },
           "position": {
             "x": 0,
-            "y": 0,
+            "y": 2,
             "width": 3,
-            "height": 6
+            "height": 7
           }
         },
         {
@@ -568,16 +606,20 @@
               {
                 "name": "main_query",
                 "query": {
-                  "datasetName": "flow",
+                  "datasetName": "flow_decade",
                   "disaggregated": false,
                   "fields": [
                     {
-                      "name": "event_date",
-                      "expression": "`event_date`"
+                      "name": "month",
+                      "expression": "`month`"
                     },
                     {
                       "name": "entropy",
                       "expression": "`entropy`"
+                    },
+                    {
+                      "name": "regime",
+                      "expression": "`regime`"
                     }
                   ]
                 }
@@ -587,16 +629,16 @@
               "version": 3,
               "widgetType": "line",
               "frame": {
-                "title": "Hourly entropy, nats; ln(24) = 3.18 is uniform (OQ-9 candidate)",
+                "title": "Hourly entropy, nats (ln 24 = 3.18 is uniform)",
                 "showTitle": true
               },
               "encodings": {
                 "x": {
-                  "fieldName": "event_date",
+                  "fieldName": "month",
                   "scale": {
                     "type": "temporal"
                   },
-                  "displayName": "event_date"
+                  "displayName": "month"
                 },
                 "y": {
                   "fieldName": "entropy",
@@ -604,15 +646,22 @@
                     "type": "quantitative"
                   },
                   "displayName": "entropy"
+                },
+                "color": {
+                  "fieldName": "regime",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "regime"
                 }
               }
             }
           },
           "position": {
             "x": 3,
-            "y": 0,
+            "y": 2,
             "width": 3,
-            "height": 6
+            "height": 7
           }
         },
         {
@@ -622,16 +671,20 @@
               {
                 "name": "main_query",
                 "query": {
-                  "datasetName": "flow",
+                  "datasetName": "flow_decade",
                   "disaggregated": false,
                   "fields": [
                     {
-                      "name": "event_date",
-                      "expression": "`event_date`"
+                      "name": "month",
+                      "expression": "`month`"
                     },
                     {
                       "name": "cv",
                       "expression": "`cv`"
+                    },
+                    {
+                      "name": "regime",
+                      "expression": "`regime`"
                     }
                   ]
                 }
@@ -641,16 +694,16 @@
               "version": 3,
               "widgetType": "line",
               "frame": {
-                "title": "Coefficient of variation (OQ-9 candidate; needs weeks of data)",
+                "title": "Coefficient of variation of hourly pushes",
                 "showTitle": true
               },
               "encodings": {
                 "x": {
-                  "fieldName": "event_date",
+                  "fieldName": "month",
                   "scale": {
                     "type": "temporal"
                   },
-                  "displayName": "event_date"
+                  "displayName": "month"
                 },
                 "y": {
                   "fieldName": "cv",
@@ -658,13 +711,20 @@
                     "type": "quantitative"
                   },
                   "displayName": "cv"
+                },
+                "color": {
+                  "fieldName": "regime",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "regime"
                 }
               }
             }
           },
           "position": {
             "x": 0,
-            "y": 6,
+            "y": 9,
             "width": 6,
             "height": 6
           }
@@ -677,25 +737,37 @@
       "layout": [
         {
           "widget": {
-            "name": "reopen_rates",
+            "name": "rework_note",
+            "textbox_spec": "**Entire page is stream-only (hourly grain):** rework signals are payload-derived \u2014 history awaits the **pass-2 payload backfill**. Counts are also thinned by the filtered feed (OQ-1): treat as plumbing validation, not ecosystem signal, until backfilled."
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "reopens_hourly",
             "queries": [
               {
                 "name": "main_query",
                 "query": {
-                  "datasetName": "rework_daily",
+                  "datasetName": "rework_hourly",
                   "disaggregated": false,
                   "fields": [
                     {
-                      "name": "day",
-                      "expression": "`day`"
+                      "name": "event_hour",
+                      "expression": "`event_hour`"
                     },
                     {
-                      "name": "pr_reopen_rate",
-                      "expression": "`pr_reopen_rate`"
+                      "name": "pr_reopened",
+                      "expression": "`pr_reopened`"
                     },
                     {
-                      "name": "issue_reopen_rate",
-                      "expression": "`issue_reopen_rate`"
+                      "name": "issues_reopened",
+                      "expression": "`issues_reopened`"
                     }
                   ]
                 }
@@ -705,51 +777,55 @@
               "version": 3,
               "widgetType": "line",
               "frame": {
-                "title": "Reopen rates: PRs and issues (stream; thin-sample caveat OQ-1)",
+                "title": "Reopened PRs and issues per hour",
                 "showTitle": true
               },
               "encodings": {
                 "x": {
-                  "fieldName": "day",
+                  "fieldName": "event_hour",
                   "scale": {
                     "type": "temporal"
                   },
-                  "displayName": "day"
+                  "displayName": "event_hour"
                 },
                 "y": {
-                  "fieldName": "pr_reopen_rate",
+                  "fieldName": "pr_reopened",
                   "scale": {
                     "type": "quantitative"
                   },
-                  "displayName": "pr_reopen_rate"
+                  "displayName": "pr_reopened"
                 }
               }
             }
           },
           "position": {
             "x": 0,
-            "y": 0,
+            "y": 2,
             "width": 3,
             "height": 6
           }
         },
         {
           "widget": {
-            "name": "close_no_merge",
+            "name": "closures_hourly",
             "queries": [
               {
                 "name": "main_query",
                 "query": {
-                  "datasetName": "rework_daily",
+                  "datasetName": "rework_hourly",
                   "disaggregated": false,
                   "fields": [
                     {
-                      "name": "day",
-                      "expression": "`day`"
+                      "name": "event_hour",
+                      "expression": "`event_hour`"
                     },
                     {
-                      "name": "pr_closed_without_merge_rate",
-                      "expression": "`pr_closed_without_merge_rate`"
+                      "name": "pr_merged",
+                      "expression": "`pr_merged`"
+                    },
+                    {
+                      "name": "pr_closed_no_merge",
+                      "expression": "`pr_closed_no_merge`"
                     }
                   ]
                 }
@@ -759,30 +835,30 @@
               "version": 3,
               "widgetType": "line",
               "frame": {
-                "title": "PRs closed without merge / all closures (OQ-2 v1 definition)",
+                "title": "PR closures per hour: merged vs closed-without-merge (OQ-2)",
                 "showTitle": true
               },
               "encodings": {
                 "x": {
-                  "fieldName": "day",
+                  "fieldName": "event_hour",
                   "scale": {
                     "type": "temporal"
                   },
-                  "displayName": "day"
+                  "displayName": "event_hour"
                 },
                 "y": {
-                  "fieldName": "pr_closed_without_merge_rate",
+                  "fieldName": "pr_merged",
                   "scale": {
                     "type": "quantitative"
                   },
-                  "displayName": "pr_closed_without_merge_rate"
+                  "displayName": "pr_merged"
                 }
               }
             }
           },
           "position": {
             "x": 3,
-            "y": 0,
+            "y": 2,
             "width": 3,
             "height": 6
           }
@@ -794,12 +870,12 @@
               {
                 "name": "main_query",
                 "query": {
-                  "datasetName": "review_outcomes",
+                  "datasetName": "review_hourly",
                   "disaggregated": false,
                   "fields": [
                     {
-                      "name": "day",
-                      "expression": "`day`"
+                      "name": "event_hour",
+                      "expression": "`event_hour`"
                     },
                     {
                       "name": "reviews",
@@ -817,16 +893,16 @@
               "version": 3,
               "widgetType": "bar",
               "frame": {
-                "title": "Review outcomes per day (dismissed = rework proxy)",
+                "title": "Review outcomes per hour (dismissed = rework proxy)",
                 "showTitle": true
               },
               "encodings": {
                 "x": {
-                  "fieldName": "day",
+                  "fieldName": "event_hour",
                   "scale": {
                     "type": "temporal"
                   },
-                  "displayName": "day"
+                  "displayName": "event_hour"
                 },
                 "y": {
                   "fieldName": "reviews",
@@ -847,7 +923,7 @@
           },
           "position": {
             "x": 0,
-            "y": 6,
+            "y": 8,
             "width": 6,
             "height": 6
           }
@@ -919,31 +995,35 @@
           "position": {
             "x": 0,
             "y": 0,
-            "width": 6,
+            "width": 3,
             "height": 7
           }
         },
         {
           "widget": {
-            "name": "actors_daily",
+            "name": "actors_curve",
             "queries": [
               {
                 "name": "main_query",
                 "query": {
-                  "datasetName": "contribution",
+                  "datasetName": "actors_decade",
                   "disaggregated": false,
                   "fields": [
                     {
-                      "name": "event_date",
-                      "expression": "`event_date`"
+                      "name": "month",
+                      "expression": "`month`"
                     },
                     {
-                      "name": "actors",
-                      "expression": "`actors`"
+                      "name": "avg_hourly_actors",
+                      "expression": "`avg_hourly_actors`"
                     },
                     {
-                      "name": "actors_human",
-                      "expression": "`actors_human`"
+                      "name": "avg_hourly_actors_human",
+                      "expression": "`avg_hourly_actors_human`"
+                    },
+                    {
+                      "name": "regime",
+                      "expression": "`regime`"
                     }
                   ]
                 }
@@ -953,32 +1033,51 @@
               "version": 3,
               "widgetType": "line",
               "frame": {
-                "title": "Daily distinct actors (all vs human)",
+                "title": "Avg distinct actors per hour, 2016-present (all vs human)",
                 "showTitle": true
               },
               "encodings": {
                 "x": {
-                  "fieldName": "event_date",
+                  "fieldName": "month",
                   "scale": {
                     "type": "temporal"
                   },
-                  "displayName": "event_date"
+                  "displayName": "month"
                 },
                 "y": {
-                  "fieldName": "actors",
+                  "fieldName": "avg_hourly_actors",
                   "scale": {
                     "type": "quantitative"
                   },
-                  "displayName": "actors"
+                  "displayName": "avg_hourly_actors"
+                },
+                "color": {
+                  "fieldName": "regime",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "regime"
                 }
               }
             }
           },
           "position": {
+            "x": 3,
+            "y": 0,
+            "width": 3,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "contrib_note",
+            "textbox_spec": "**Stream-only tiles below:** concentration, per-actor percentiles, and new actors need **actor-grain history**, which the census import does not carry \u2014 unlocking them requires an actor-daily export from BigQuery (planned, not yet run). These are daily by construction (actor sets don't aggregate hourly)."
+          },
+          "position": {
             "x": 0,
             "y": 7,
-            "width": 3,
-            "height": 6
+            "width": 6,
+            "height": 2
           }
         },
         {
@@ -1007,7 +1106,7 @@
               "version": 3,
               "widgetType": "line",
               "frame": {
-                "title": "Top-100 actor share of daily events",
+                "title": "Top-100 actor share of daily events (stream era)",
                 "showTitle": true
               },
               "encodings": {
@@ -1029,70 +1128,8 @@
             }
           },
           "position": {
-            "x": 3,
-            "y": 7,
-            "width": 3,
-            "height": 6
-          }
-        },
-        {
-          "widget": {
-            "name": "per_actor",
-            "queries": [
-              {
-                "name": "main_query",
-                "query": {
-                  "datasetName": "contribution",
-                  "disaggregated": false,
-                  "fields": [
-                    {
-                      "name": "event_date",
-                      "expression": "`event_date`"
-                    },
-                    {
-                      "name": "events_per_actor_p50",
-                      "expression": "`events_per_actor_p50`"
-                    },
-                    {
-                      "name": "events_per_actor_p90",
-                      "expression": "`events_per_actor_p90`"
-                    },
-                    {
-                      "name": "events_per_actor_p99",
-                      "expression": "`events_per_actor_p99`"
-                    }
-                  ]
-                }
-              }
-            ],
-            "spec": {
-              "version": 3,
-              "widgetType": "line",
-              "frame": {
-                "title": "Events per actor: p50 / p90 / p99",
-                "showTitle": true
-              },
-              "encodings": {
-                "x": {
-                  "fieldName": "event_date",
-                  "scale": {
-                    "type": "temporal"
-                  },
-                  "displayName": "event_date"
-                },
-                "y": {
-                  "fieldName": "events_per_actor_p90",
-                  "scale": {
-                    "type": "quantitative"
-                  },
-                  "displayName": "events_per_actor_p90"
-                }
-              }
-            }
-          },
-          "position": {
             "x": 0,
-            "y": 13,
+            "y": 9,
             "width": 3,
             "height": 6
           }
@@ -1123,7 +1160,7 @@
               "version": 3,
               "widgetType": "bar",
               "frame": {
-                "title": "New actors per day (relative to ingested history)",
+                "title": "New actors per day, relative to ingested history (stream era)",
                 "showTitle": true
               },
               "encodings": {
@@ -1146,7 +1183,7 @@
           },
           "position": {
             "x": 3,
-            "y": 13,
+            "y": 9,
             "width": 3,
             "height": 6
           }
@@ -1159,25 +1196,33 @@
       "layout": [
         {
           "widget": {
-            "name": "stars_forks",
+            "name": "engage_note",
+            "textbox_spec": "**Stream-only (hourly grain):** stars and forks are census-countable and their decade history is importable with a small **pass-1b export extension** \u2014 not yet run. Current data is the filtered feed (OQ-1): stream-observed counts, NOT ecosystem totals."
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "stars_hourly",
             "queries": [
               {
                 "name": "main_query",
                 "query": {
-                  "datasetName": "engagement",
+                  "datasetName": "engagement_hourly",
                   "disaggregated": false,
                   "fields": [
                     {
-                      "name": "event_date",
-                      "expression": "`event_date`"
+                      "name": "event_hour",
+                      "expression": "`event_hour`"
                     },
                     {
                       "name": "stars",
                       "expression": "`stars`"
-                    },
-                    {
-                      "name": "forks",
-                      "expression": "`forks`"
                     }
                   ]
                 }
@@ -1187,16 +1232,16 @@
               "version": 3,
               "widgetType": "line",
               "frame": {
-                "title": "Stars and forks per day \u2014 stream-observed, NOT census (OQ-1)",
+                "title": "Stars per hour (stream-observed, NOT census)",
                 "showTitle": true
               },
               "encodings": {
                 "x": {
-                  "fieldName": "event_date",
+                  "fieldName": "event_hour",
                   "scale": {
                     "type": "temporal"
                   },
-                  "displayName": "event_date"
+                  "displayName": "event_hour"
                 },
                 "y": {
                   "fieldName": "stars",
@@ -1210,32 +1255,28 @@
           },
           "position": {
             "x": 0,
-            "y": 0,
+            "y": 2,
             "width": 3,
             "height": 6
           }
         },
         {
           "widget": {
-            "name": "engaged_repos",
+            "name": "forks_hourly",
             "queries": [
               {
                 "name": "main_query",
                 "query": {
-                  "datasetName": "engagement",
+                  "datasetName": "engagement_hourly",
                   "disaggregated": false,
                   "fields": [
                     {
-                      "name": "event_date",
-                      "expression": "`event_date`"
+                      "name": "event_hour",
+                      "expression": "`event_hour`"
                     },
                     {
-                      "name": "distinct_starred_repos",
-                      "expression": "`distinct_starred_repos`"
-                    },
-                    {
-                      "name": "distinct_forked_repos",
-                      "expression": "`distinct_forked_repos`"
+                      "name": "forks",
+                      "expression": "`forks`"
                     }
                   ]
                 }
@@ -1245,30 +1286,30 @@
               "version": 3,
               "widgetType": "line",
               "frame": {
-                "title": "Distinct repos starred / forked per day",
+                "title": "Forks per hour (stream-observed, NOT census)",
                 "showTitle": true
               },
               "encodings": {
                 "x": {
-                  "fieldName": "event_date",
+                  "fieldName": "event_hour",
                   "scale": {
                     "type": "temporal"
                   },
-                  "displayName": "event_date"
+                  "displayName": "event_hour"
                 },
                 "y": {
-                  "fieldName": "distinct_starred_repos",
+                  "fieldName": "forks",
                   "scale": {
                     "type": "quantitative"
                   },
-                  "displayName": "distinct_starred_repos"
+                  "displayName": "forks"
                 }
               }
             }
           },
           "position": {
             "x": 3,
-            "y": 0,
+            "y": 2,
             "width": 3,
             "height": 6
           }
@@ -1279,6 +1320,18 @@
       "name": "sustainability",
       "displayName": "Sustainability & Network",
       "layout": [
+        {
+          "widget": {
+            "name": "sustain_note",
+            "textbox_spec": "**Stream-only:** retention and network structure need **actor-grain history** (same unlock as Contribution: an actor-daily BigQuery export). Both are inherently daily \u2014 retention is a day-over-day set comparison; with ~days of stream data these are early readings."
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 2
+          }
+        },
         {
           "widget": {
             "name": "retention_trend",
@@ -1309,7 +1362,7 @@
               "version": 3,
               "widgetType": "line",
               "frame": {
-                "title": "Actor retention: 1-day and 7-day (gap-safe NULLs)",
+                "title": "Actor retention: 1-day and 7-day (stream era)",
                 "showTitle": true
               },
               "encodings": {
@@ -1332,65 +1385,7 @@
           },
           "position": {
             "x": 0,
-            "y": 0,
-            "width": 3,
-            "height": 6
-          }
-        },
-        {
-          "widget": {
-            "name": "active_actors",
-            "queries": [
-              {
-                "name": "main_query",
-                "query": {
-                  "datasetName": "retention",
-                  "disaggregated": false,
-                  "fields": [
-                    {
-                      "name": "event_date",
-                      "expression": "`event_date`"
-                    },
-                    {
-                      "name": "active_actors",
-                      "expression": "`active_actors`"
-                    },
-                    {
-                      "name": "active_actors_human",
-                      "expression": "`active_actors_human`"
-                    }
-                  ]
-                }
-              }
-            ],
-            "spec": {
-              "version": 3,
-              "widgetType": "line",
-              "frame": {
-                "title": "Daily active actors (all vs human)",
-                "showTitle": true
-              },
-              "encodings": {
-                "x": {
-                  "fieldName": "event_date",
-                  "scale": {
-                    "type": "temporal"
-                  },
-                  "displayName": "event_date"
-                },
-                "y": {
-                  "fieldName": "active_actors",
-                  "scale": {
-                    "type": "quantitative"
-                  },
-                  "displayName": "active_actors"
-                }
-              }
-            }
-          },
-          "position": {
-            "x": 3,
-            "y": 0,
+            "y": 2,
             "width": 3,
             "height": 6
           }
@@ -1412,6 +1407,10 @@
                     {
                       "name": "multi_repo_actor_share",
                       "expression": "`multi_repo_actor_share`"
+                    },
+                    {
+                      "name": "single_actor_repo_share",
+                      "expression": "`single_actor_repo_share`"
                     }
                   ]
                 }
@@ -1421,7 +1420,7 @@
               "version": 3,
               "widgetType": "line",
               "frame": {
-                "title": "Multi-repo actor share (cross-repo connectivity)",
+                "title": "Multi-repo actor share / single-actor repo share (stream era)",
                 "showTitle": true
               },
               "encodings": {
@@ -1443,62 +1442,8 @@
             }
           },
           "position": {
-            "x": 0,
-            "y": 6,
-            "width": 3,
-            "height": 6
-          }
-        },
-        {
-          "widget": {
-            "name": "bus_factor",
-            "queries": [
-              {
-                "name": "main_query",
-                "query": {
-                  "datasetName": "network",
-                  "disaggregated": false,
-                  "fields": [
-                    {
-                      "name": "event_date",
-                      "expression": "`event_date`"
-                    },
-                    {
-                      "name": "single_actor_repo_share",
-                      "expression": "`single_actor_repo_share`"
-                    }
-                  ]
-                }
-              }
-            ],
-            "spec": {
-              "version": 3,
-              "widgetType": "line",
-              "frame": {
-                "title": "Single-actor repo share (bus-factor-1 proxy)",
-                "showTitle": true
-              },
-              "encodings": {
-                "x": {
-                  "fieldName": "event_date",
-                  "scale": {
-                    "type": "temporal"
-                  },
-                  "displayName": "event_date"
-                },
-                "y": {
-                  "fieldName": "single_actor_repo_share",
-                  "scale": {
-                    "type": "quantitative"
-                  },
-                  "displayName": "single_actor_repo_share"
-                }
-              }
-            }
-          },
-          "position": {
             "x": 3,
-            "y": 6,
+            "y": 2,
             "width": 3,
             "height": 6
           }
@@ -1645,7 +1590,7 @@
               "version": 3,
               "widgetType": "line",
               "frame": {
-                "title": "seasonal_24h: prediction vs actual (total events)",
+                "title": "seasonal_24h: prediction vs actual, hourly (total events)",
                 "showTitle": true
               },
               "encodings": {
