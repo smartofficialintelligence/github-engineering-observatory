@@ -29,10 +29,10 @@
       ]
     },
     {
-      "name": "velocity_recent",
-      "displayName": "velocity_recent",
+      "name": "production_yoy",
+      "displayName": "production_yoy",
       "queryLines": [
-        "\n            SELECT event_hour, production_events,\n                   ROUND(production_events_pct_24h, 4) AS production_pct_24h\n            FROM github_observatory.gold.ecosystem_velocity\n            WHERE event_hour >= current_timestamp() - INTERVAL 14 DAYS"
+        "\n            WITH m AS (\n                SELECT date_trunc('MONTH', event_hour) AS month,\n                       SUM(push_events) / COUNT(*) AS pushes_per_hour\n                FROM github_observatory.gold.ecosystem_hourly GROUP BY 1\n            )\n            SELECT c.month,\n                   ROUND((c.pushes_per_hour - p.pushes_per_hour)\n                         / p.pushes_per_hour, 4) AS yoy_growth,\n                   CASE WHEN c.month < DATE'2025-06-01'\n                        THEN 'full feed (thru May 2025)'\n                        ELSE 'filtered feed (Jun 2025 on, OQ-1)' END AS regime\n            FROM m c\n            JOIN m p ON p.month = c.month - INTERVAL 12 MONTHS\n            -- a YoY spanning the regime boundary measures the filter,\n            -- not production: exclude it\n            WHERE NOT (c.month >= DATE'2025-06-01' AND p.month < DATE'2025-06-01')"
       ]
     },
     {
@@ -385,16 +385,20 @@
               {
                 "name": "main_query",
                 "query": {
-                  "datasetName": "velocity_recent",
+                  "datasetName": "production_yoy",
                   "disaggregated": false,
                   "fields": [
                     {
-                      "name": "event_hour",
-                      "expression": "`event_hour`"
+                      "name": "month",
+                      "expression": "`month`"
                     },
                     {
-                      "name": "production_pct_24h",
-                      "expression": "`production_pct_24h`"
+                      "name": "yoy_growth",
+                      "expression": "`yoy_growth`"
+                    },
+                    {
+                      "name": "regime",
+                      "expression": "`regime`"
                     }
                   ]
                 }
@@ -402,25 +406,32 @@
             ],
             "spec": {
               "version": 3,
-              "widgetType": "line",
+              "widgetType": "bar",
               "frame": {
-                "title": "Production acceleration (% vs same hour yesterday)",
+                "title": "Production acceleration: YoY growth of pushes/hour (cross-regime YoY excluded)",
                 "showTitle": true
               },
               "encodings": {
                 "x": {
-                  "fieldName": "event_hour",
+                  "fieldName": "month",
                   "scale": {
                     "type": "temporal"
                   },
-                  "displayName": "event_hour"
+                  "displayName": "month"
                 },
                 "y": {
-                  "fieldName": "production_pct_24h",
+                  "fieldName": "yoy_growth",
                   "scale": {
                     "type": "quantitative"
                   },
-                  "displayName": "production_pct_24h"
+                  "displayName": "yoy_growth"
+                },
+                "color": {
+                  "fieldName": "regime",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "regime"
                 }
               }
             }

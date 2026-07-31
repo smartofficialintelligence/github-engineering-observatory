@@ -148,11 +148,23 @@ OBSERVATORY = {
                    SUM(issues_closed) AS issues_closed,
                    SUM(releases_published) AS releases_published
             FROM {G}.ecosystem_hourly WHERE source = 'stream' GROUP BY 1"""),
-        dataset("velocity_recent", f"""
-            SELECT event_hour, production_events,
-                   ROUND(production_events_pct_24h, 4) AS production_pct_24h
-            FROM {G}.ecosystem_velocity
-            WHERE event_hour >= current_timestamp() - INTERVAL 14 DAYS"""),
+        dataset("production_yoy", f"""
+            WITH m AS (
+                SELECT date_trunc('MONTH', event_hour) AS month,
+                       SUM(push_events) / COUNT(*) AS pushes_per_hour
+                FROM {G}.ecosystem_hourly GROUP BY 1
+            )
+            SELECT c.month,
+                   ROUND((c.pushes_per_hour - p.pushes_per_hour)
+                         / p.pushes_per_hour, 4) AS yoy_growth,
+                   CASE WHEN c.month < DATE'2025-06-01'
+                        THEN 'full feed (thru May 2025)'
+                        ELSE 'filtered feed (Jun 2025 on, OQ-1)' END AS regime
+            FROM m c
+            JOIN m p ON p.month = c.month - INTERVAL 12 MONTHS
+            -- a YoY spanning the regime boundary measures the filter,
+            -- not production: exclude it
+            WHERE NOT (c.month >= DATE'2025-06-01' AND p.month < DATE'2025-06-01')"""),
         # ---- flow ----------------------------------------------------------
         dataset("flow", f"""
             SELECT event_date, hours_observed,
@@ -250,11 +262,12 @@ OBSERVATORY = {
                        line_enc("day", "production_events"),
                        (0, 7, 3, 6),
                        fields=[field("day"), field("production_events")]),
-                widget("prod_accel", "velocity_recent", "line",
-                       "Production acceleration (% vs same hour yesterday)",
-                       line_enc("event_hour", "production_pct_24h"),
+                widget("prod_accel", "production_yoy", "bar",
+                       "Production acceleration: YoY growth of pushes/hour "
+                       "(cross-regime YoY excluded)",
+                       line_enc("month", "yoy_growth", color="regime"),
                        (3, 7, 3, 6),
-                       fields=[field("event_hour"), field("production_pct_24h")]),
+                       fields=[field("month"), field("yoy_growth"), field("regime")]),
                 widget("lifecycle_daily", "production_daily", "line",
                        "PR merges and releases per day (stream)",
                        line_enc("day", "pr_merged"),
