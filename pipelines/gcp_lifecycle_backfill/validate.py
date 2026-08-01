@@ -145,12 +145,55 @@ def _run(cmd: list[str], check: bool = True) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, capture_output=True, text=True, check=check)
 
 
-def run_bq(query: str, project: str, out_csv: Path) -> dict:
-    """Execute the query via bq; write CSV output and return job stats."""
+# BigQuery on-demand pricing (2026-08). Update if Google changes rates.
+BQ_PRICE_PER_TIB_USD = 6.25
+_TIB = 1024 ** 4
+
+
+def _bytes_to_cost_usd(bytes_scanned: int) -> float:
+    """Convert bytes-to-scan into an on-demand USD cost estimate."""
+    return bytes_scanned / _TIB * BQ_PRICE_PER_TIB_USD
+
+
+def dry_run_bytes(query: str, project: str) -> int:
+    """Ask BigQuery how many bytes this query would scan, without billing.
+
+    Guards against the class of mistake that scanned the whole
+    githubarchive.year.2023 (~4.34 TiB) for one month of validation
+    ($27) when githubarchive.month.202306 would have cost ~$2.50.
+    """
+    r = _run([
+        "bq", f"--project_id={project}",
+        "query", "--use_legacy_sql=false", "--format=json",
+        "--dry_run", query,
+    ])
+    # Dry-run stdout is the job resource as JSON; extract query stats.
+    job = json.loads(r.stdout)
+    return int(job["statistics"]["query"]["totalBytesProcessed"])
+
+
+def run_bq(query: str, project: str, out_csv: Path, *,
+           max_cost_usd: float, yes: bool) -> dict:
+    """Dry-run first, gate on --yes if cost exceeds --max-cost-usd,
+    then run the query with a matching maximum_bytes_billed hard cap."""
+    scan_bytes = dry_run_bytes(query, project)
+    est_cost = _bytes_to_cost_usd(scan_bytes)
+    print(f"dry-run: scan {scan_bytes / _TIB:.2f} TiB → est ${est_cost:.2f}",
+          flush=True)
+    if est_cost > max_cost_usd and not yes:
+        raise SystemExit(
+            f"aborted: dry-run estimate ${est_cost:.2f} exceeds "
+            f"--max-cost-usd={max_cost_usd:.2f}. Re-run with --yes to override."
+        )
+
+    # Hard cap: BQ fails the job immediately if it would scan more than this.
+    # 10% headroom over dry-run to allow for BQ's own accuracy tolerance.
+    max_bytes_billed = int(scan_bytes * 1.1)
     job_id = f"lifecycle_validate_{dt.datetime.now(dt.timezone.utc):%Y%m%d%H%M%S}"
     r = _run([
         "bq", f"--project_id={project}", "--job_id", job_id,
         "query", "--use_legacy_sql=false", "--format=csv",
+        f"--maximum_bytes_billed={max_bytes_billed}",
         "--max_rows=1000",
         query,
     ])
@@ -235,6 +278,12 @@ def main(argv=None) -> int:
                    help="gs:// path to the Spark output for this year+month")
     p.add_argument("--workdir", default=None,
                    help="local scratch dir (default: tempdir)")
+    p.add_argument("--max-cost-usd", type=float, default=5.0,
+                   help="abort if dry-run estimates cost above this (default $5)."
+                   " Applies a matching maximum_bytes_billed hard cap on"
+                   " the real query. Override with --yes.")
+    p.add_argument("--yes", action="store_true",
+                   help="proceed even if dry-run estimate exceeds --max-cost-usd")
     args = p.parse_args(argv)
 
     workdir = Path(args.workdir or tempfile.mkdtemp(prefix="lifecycle_validate_"))
@@ -243,7 +292,8 @@ def main(argv=None) -> int:
     spark_local = workdir / "spark"
 
     query = build_bq_query(args.year, args.month)
-    bq_stats = run_bq(query, args.project, bq_csv)
+    bq_stats = run_bq(query, args.project, bq_csv,
+                      max_cost_usd=args.max_cost_usd, yes=args.yes)
     print(f"bq: {bq_stats['rows']} rows, "
           f"{bq_stats['bytes_billed']/1e9:.1f} GB billed", flush=True)
 

@@ -38,6 +38,28 @@ SPARK_JOB_PATH = HERE / "spark_job.py"
 # https://cloud.google.com/dataproc-serverless/docs/concepts/versions/spark-runtime-2.2
 DATAPROC_RUNTIME_VERSION = "2.2"
 
+# Dataproc Serverless standard-tier list price (2026-08). Update if Google
+# changes rates. Cost is DCU-seconds billed regardless of parallelism.
+DCU_PRICE_PER_HOUR_USD = 0.06
+
+# Bench cost model: 2023-06 consumed 26.9 DCU-hours (~$1.61). Actual per-
+# month cost varies with data volume — 2016-2020 are much smaller, 2021-2024
+# grow, 2025+ dropped under the OQ-1 filter. This is a rough upper bound
+# for the sanity check; the real cost is reported after each batch.
+COST_MODEL_DCU_HOURS_PER_MONTH = {
+    # year: approx DCU-hours per month (upper bound based on ecosystem volume)
+    2016: 4, 2017: 6, 2018: 8, 2019: 10, 2020: 15,
+    2021: 20, 2022: 22, 2023: 27, 2024: 30,
+    2025: 15,   # OQ-1 filter reduced volume mid-2025
+}
+DEFAULT_DCU_HOURS_PER_MONTH = 27  # fallback for years not in the model
+
+
+def estimate_batch_cost_usd(year: int, months: int = 12) -> float:
+    """Rough cost estimate for a Dataproc batch covering ``months`` of ``year``."""
+    per_month = COST_MODEL_DCU_HOURS_PER_MONTH.get(year, DEFAULT_DCU_HOURS_PER_MONTH)
+    return per_month * months * DCU_PRICE_PER_HOUR_USD
+
 
 def _run(cmd: list[str], check: bool = True) -> subprocess.CompletedProcess:
     print(f"$ {' '.join(cmd)}", flush=True)
@@ -63,6 +85,7 @@ def submit_batch(
     service_account: str | None,
     subnet: str | None,
     ttl: str,
+    max_executors: int,
 ) -> dict:
     """Submit one PySpark batch. ``gcloud batches submit`` blocks until
     the batch reaches a terminal state, so this call is synchronous.
@@ -71,6 +94,10 @@ def submit_batch(
     # Dataproc Serverless has a default TTL of 4h — insufficient for
     # year-length batches. Set explicitly. Cost billed on DCU-seconds
     # regardless of TTL, so no downside to a generous cap.
+    #
+    # spark.dynamicAllocation.maxExecutors: without this, autoscaling caps
+    # around ~15-30 executors and long jobs hit TTL. Cost is DCU-seconds
+    # billed regardless of parallelism — higher max just finishes faster.
     args = [
         "gcloud", "dataproc", "batches", "submit", "pyspark",
         pyfile_gs,
@@ -80,6 +107,7 @@ def submit_batch(
         f"--version={DATAPROC_RUNTIME_VERSION}",
         f"--deps-bucket=gs://{deps_bucket}",
         f"--ttl={ttl}",
+        f"--properties=spark.dynamicAllocation.maxExecutors={max_executors}",
     ]
     if service_account:
         args.append(f"--service-account={service_account}")
@@ -191,7 +219,7 @@ def run_one(*, year: int, month: int | None, args: argparse.Namespace,
         project=args.project, region=args.region, batch_id=batch_id,
         pyfile_gs=pyfile_gs, deps_bucket=args.bucket, job_args=job_args,
         service_account=args.service_account, subnet=args.subnet,
-        ttl=args.ttl,
+        ttl=args.ttl, max_executors=args.max_executors,
     )
     summary = batch_summary(batch)
     summary.update({
@@ -203,27 +231,65 @@ def run_one(*, year: int, month: int | None, args: argparse.Namespace,
     return summary
 
 
+def _gate_on_cost(estimated_usd: float, args: argparse.Namespace, label: str) -> None:
+    """Print estimated cost. Abort unless --yes or under --max-cost-usd."""
+    print(f"COST ESTIMATE: {label} ≈ ${estimated_usd:.2f}"
+          f" (list price; actual reported after each batch)", flush=True)
+    if estimated_usd > args.max_cost_usd and not args.yes:
+        raise SystemExit(
+            f"aborted: estimated ${estimated_usd:.2f} exceeds "
+            f"--max-cost-usd={args.max_cost_usd:.2f}. Re-run with --yes to override."
+        )
+
+
 def cmd_bench(args: argparse.Namespace) -> int:
+    est = estimate_batch_cost_usd(args.year, months=1)
+    _gate_on_cost(est, args, f"bench {args.year}-{args.month:02d}")
     pyfile_gs = upload_pyfile(args.bucket, args.project)
     run_one(year=args.year, month=args.month, args=args, pyfile_gs=pyfile_gs)
     return 0
 
 
+def _parse_years(spec: str) -> list[int]:
+    if "-" in spec:
+        start, end = spec.split("-")
+        return list(range(int(start), int(end) + 1))
+    return [int(y) for y in spec.split(",")]
+
+
 def cmd_backfill(args: argparse.Namespace) -> int:
-    if "-" in args.years:
-        start, end = args.years.split("-")
-        years = list(range(int(start), int(end) + 1))
-    else:
-        years = [int(y) for y in args.years.split(",")]
+    """Backfill one or more years. Decomposes each year into 12 monthly
+    batches by default — each batch is small (<1h), safe under any TTL,
+    and independently re-runnable if it fails. Use --yearly to opt back
+    into the old one-batch-per-year behavior (only recommended after a
+    successful monthly run establishes actual per-year DCU cost).
+    """
+    years = _parse_years(args.years)
+    unit = "year" if args.yearly else "month"
+    n_units = len(years) if args.yearly else len(years) * 12
+    total_est = sum(
+        estimate_batch_cost_usd(y, months=12 if args.yearly else 1)
+        * (1 if args.yearly else 12)
+        for y in years
+    )
+    _gate_on_cost(
+        total_est, args,
+        f"{n_units} {unit} batch(es) across years {years[0]}-{years[-1]}",
+    )
 
     pyfile_gs = upload_pyfile(args.bucket, args.project)
     summaries = []
-    for year in years:
-        summaries.append(run_one(year=year, month=None, args=args,
+    plan = [(y, None) for y in years] if args.yearly else [
+        (y, m) for y in years for m in range(1, 13)
+    ]
+    for i, (year, month) in enumerate(plan, 1):
+        print(f"\n[{i}/{len(plan)}] year={year} month={month or 'full'}", flush=True)
+        summaries.append(run_one(year=year, month=month, args=args,
                                  pyfile_gs=pyfile_gs))
     total_dcu = sum(s["dcu_hours"] for s in summaries)
-    print(f"\nbackfill complete: {len(summaries)} years, "
-          f"{total_dcu:.1f} DCU-hours total", flush=True)
+    total_usd = total_dcu * DCU_PRICE_PER_HOUR_USD
+    print(f"\nbackfill complete: {len(summaries)} batch(es), "
+          f"{total_dcu:.1f} DCU-hours total (~${total_usd:.2f})", flush=True)
     return 0
 
 
@@ -246,6 +312,17 @@ def build_argparser() -> argparse.ArgumentParser:
                         help="Dataproc batch TTL (default 12h; bench month ran"
                         " in <1h so this is generous). Cost is DCU-seconds"
                         " billed regardless of TTL — set high enough to finish.")
+    common.add_argument("--max-executors", type=int, default=100,
+                        help="spark.dynamicAllocation.maxExecutors ceiling"
+                        " (default 100). Higher = faster wall-clock, same"
+                        " DCU-second cost. Prevents TTL cancellation on large"
+                        " batches.")
+    common.add_argument("--max-cost-usd", type=float, default=5.0,
+                        help="abort if the estimated cost for this invocation"
+                        " exceeds this (default $5). Override with --yes.")
+    common.add_argument("--yes", action="store_true",
+                        help="proceed even if estimated cost exceeds"
+                        " --max-cost-usd")
 
     subs = p.add_subparsers(dest="cmd", required=True)
 
@@ -256,9 +333,14 @@ def build_argparser() -> argparse.ArgumentParser:
     b.set_defaults(fn=cmd_bench)
 
     bf = subs.add_parser("backfill", parents=[common],
-                         help="full-year(s) backfill")
+                         help="year-range backfill (default: 12 monthly batches per year)")
     bf.add_argument("--years", default="2016-2025",
                     help="e.g. 2016-2025 or 2019 or 2019,2020,2021")
+    bf.add_argument("--yearly", action="store_true",
+                    help="opt out of monthly decomposition — one batch per year."
+                    " Riskier: needs a longer TTL and any single failure loses"
+                    " the whole year's progress. Use only after monthly runs"
+                    " have established the per-year cost/runtime empirically.")
     bf.set_defaults(fn=cmd_backfill)
 
     return p
