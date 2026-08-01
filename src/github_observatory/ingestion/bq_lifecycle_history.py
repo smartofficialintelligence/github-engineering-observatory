@@ -25,7 +25,10 @@ import logging
 import uuid
 from typing import Any
 
-from github_observatory.common.config import BQ_LIFECYCLE_HOURLY_TABLE
+from github_observatory.common.config import (
+    BQ_LIFECYCLE_HOURLY_TABLE,
+    GOLD_ECOSYSTEM_HOURLY_TABLE,
+)
 
 logger = logging.getLogger("github_observatory.bq_lifecycle_history")
 
@@ -143,4 +146,51 @@ def ingest_bronze_from_parquet(
 
     metrics = {k: int(v) for k, v in row.items() if isinstance(v, (int, float))}
     logger.info("lifecycle bronze merge: %s", metrics)
+    return metrics
+
+
+SOURCE_BIGQUERY = "bigquery"
+
+
+def gold_merge_sql(run_id: str) -> str:
+    """MERGE bronze.bq_lifecycle_hourly into gold.ecosystem_hourly.
+
+    Fills the 24 payload-derived columns (9 pre-v4 lifecycle + 15 v4)
+    plus the 9 census columns from pass-2 output. Stream rows are never
+    touched — the guard is ``WHEN MATCHED AND t.source = 'bigquery'``.
+
+    Pass-1 (``bronze.bq_ecosystem_hourly``) may already have inserted a
+    bigquery-source row for the same hour with payload cols NULL; this
+    MERGE refreshes those rows with the pass-2 values. Hours pass-1
+    missed (or hours never census-imported) are INSERTed fresh.
+    """
+    from github_observatory.gold.metrics import METRIC_DEFINITIONS_VERSION
+
+    metric_cols_csv = ", ".join(ALL_METRIC_COLUMNS)
+    return f"""
+MERGE INTO {GOLD_ECOSYSTEM_HOURLY_TABLE} AS t
+USING (
+    SELECT event_hour, {metric_cols_csv},
+           {METRIC_DEFINITIONS_VERSION} AS metric_version,
+           '{run_id}' AS gold_run_id,
+           current_timestamp() AS gold_built_at,
+           '{SOURCE_BIGQUERY}' AS source
+    FROM {BQ_LIFECYCLE_HOURLY_TABLE}
+) AS s
+ON t.event_hour = s.event_hour
+WHEN MATCHED AND t.source = '{SOURCE_BIGQUERY}' THEN UPDATE SET *
+WHEN NOT MATCHED THEN INSERT *"""
+
+
+def merge_lifecycle_into_gold(spark: Any) -> dict[str, int]:
+    """MERGE pass-2 lifecycle rows into Gold; never touch stream rows.
+
+    Requires Gold at v4 (24 payload columns). Caller must first invoke
+    ``gold.metrics.create_gold_tables(spark)`` to ensure the v4
+    migration has run.
+    """
+    run_id = uuid.uuid4().hex
+    row = spark.sql(gold_merge_sql(run_id)).collect()[0].asDict()
+    metrics = {k: int(v) for k, v in row.items() if isinstance(v, (int, float))}
+    logger.info("gold lifecycle merge: %s", metrics)
     return metrics

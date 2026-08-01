@@ -1,6 +1,6 @@
 # Metric Definitions
 
-**Version: 3** (2026-07-30). Any change to a definition below requires a
+**Version: 4** (2026-08-01). Any change to a definition below requires a
 version bump here and a note in the changelog table at the bottom;
 metrics computed under different versions must not be compared silently.
 
@@ -9,16 +9,19 @@ metrics computed under different versions must not be compared silently.
 `gold.ecosystem_hourly.source` identifies how a row was computed:
 
 * `stream` — aggregated by our pipeline from ingested events
-  (`silver.events`); all columns populated.
+  (`silver.events` + specialized silver tables); all columns populated.
 * `bigquery` — deep history (2016–2025) imported from the BigQuery
-  public `githubarchive` dataset via `bronze.bq_ecosystem_hourly`
-  (raw-as-received for that source, with job id / query sha
-  provenance). Only **census columns** are populated: `total_events`,
-  `push_events`, `bot_events`, the `_human` variants, and distinct
-  actor/repo counts. Payload-derived columns (`production_events`,
-  `pr_*`, `issues_*`, `releases_published`) are NULL — pass 1 of the
-  import deliberately avoids the payload column for cost; a future
-  pass 2 fills them with era-aware derivations.
+  public `githubarchive` dataset. Two passes:
+  * **Pass 1** — census columns only, via BQ SQL against
+    `githubarchive.year.YYYY` (see `bronze.bq_ecosystem_hourly`).
+  * **Pass 2** — the 24 payload-derived columns, via Dataproc
+    Serverless Spark reading the same source through the BigQuery
+    Storage Read API (see `bronze.bq_lifecycle_hourly` and
+    `docs/lifecycle_metrics_spec.md`). Pass 2 also emits census
+    columns; spec §Validation #2 asserts they match pass 1 exactly.
+  Rows for a given hour move from `NULL payload cols` (pass-1 only)
+  to `populated` (after pass-2 merge). Both passes count
+  `DISTINCT id` since the public dataset contains duplicates.
 
 **Precedence: stream wins.** The history merge never modifies a
 `stream` row; a stream rebuild may overwrite a `bigquery` row.
@@ -88,6 +91,21 @@ and reviews (flow/collaboration, not production — step 8); Watch/Fork
 | `distinct_actors_human` | same, excluding bots |
 | `distinct_repos` | `COUNT(DISTINCT repo_id)` |
 | `distinct_push_repos` | `COUNT(DISTINCT repo_id)` over pushes only |
+| `pr_events_total` (v4) | all `PullRequestEvent`, any action — denominator for state-churn ratios |
+| `issues_events_total` (v4) | all `IssuesEvent`, any action — denominator |
+| `issues_closed_completed` (v4) | `IssuesEvent` + closed + `issue_state_reason = 'completed'` |
+| `issues_closed_not_planned` (v4) | same + `state_reason = 'not_planned'` |
+| `issues_closed_duplicate` (v4) | same + `state_reason = 'duplicate'` |
+| `issues_closed_unknown` (v4) | same, `state_reason` NULL or any other value (includes all pre-Sep-2022 closures — the field was introduced by GitHub then) |
+| `reviews_approved` (v4) | `PullRequestReviewEvent` + `review_state = 'approved'` |
+| `reviews_changes_requested` (v4) | same + `state = 'changes_requested'` |
+| `reviews_commented` (v4) | same + `state = 'commented'` |
+| `reviews_dismissed` (v4) | same + `state = 'dismissed'` |
+| `issue_comments_true` (v4) | `IssueCommentEvent` with `is_pull_request = false` |
+| `issue_comments_on_prs` (v4) | `IssueCommentEvent` with `is_pull_request = true` (67.6% of the class in-sample) |
+| `pr_review_comments` (v4) | `PullRequestReviewCommentEvent` (all) |
+| `commit_comments` (v4) | `CommitCommentEvent` (all) |
+| `release_download_count_sum` (v4) | `SUM(assets_download_count)` over `ReleaseEvent` — coverage caveat: many freshly-published releases carry 0 |
 
 Rebuilds are MERGE-upserts keyed on `event_hour`: re-running over a
 window recomputes and overwrites those hours (necessary because late
@@ -199,3 +217,4 @@ open in OQ-12.
 | 1 | 2026-07-30 | Initial definitions; OQ-7 whitelist v1; OQ-2 v1 assumption (`closed` = closed-without-merge) |
 | 2 | 2026-07-30 | Added flow, contribution, engagement, data-quality, retention, network, and forecasting definitions (steps 8–10) |
 | 3 | 2026-07-30 | `source` column + stream-wins precedence; BigQuery deep-history import (census columns 2016–2025, payload columns NULL); COUNT(DISTINCT id) rule for imported data |
+| 4 | 2026-08-01 | Added 15 lifecycle columns to `gold.ecosystem_hourly` (denominators, issue closure taxonomy, review states, three comment classes, release-download sum). Populated for stream rows by extending Gold's aggregation to LEFT JOIN silver.issue_events / silver.review_events / silver.release_events; populated for historical rows by the pass-2 pipeline (`bronze.bq_lifecycle_hourly` → gold merge). See `docs/lifecycle_metrics_spec.md` v1 for column definitions and era-awareness. |

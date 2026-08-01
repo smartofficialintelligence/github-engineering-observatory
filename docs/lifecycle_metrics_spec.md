@@ -9,7 +9,7 @@ and backfilled rows (produced by the Spark job below) must be numerically
 comparable hour-for-hour where both eras overlap, so the two derivations use
 matching block-out logic (below) and matching column semantics.
 
-Pairs with `docs/metric_definitions.md` (v3): that document is the metric
+Pairs with `docs/metric_definitions.md` (v4): that document is the metric
 contract, this document is the *implementation* of that contract for one
 source (`githubarchive.year.*`). Any change to the definitions there requires
 a corresponding change here and a version bump in both.
@@ -42,18 +42,21 @@ The stream pipeline flags rows in Silver and excludes flagged rows in Gold.
 Pass-2 must reproduce **the same set** of surviving events.
 
 Stream (`silver.transforms.events_merge_sql`):
-```
+
+```text
 quality_flag =
     'non_public'          if public = FALSE
     'missing_repo_id'     if repo.id IS NULL
     'invalid_created_at'  if TRY_CAST(created_at AS TIMESTAMP) IS NULL
     NULL                  otherwise (survives)
 ```
+
 Then `gold.metrics` selects `WHERE quality_flag IS NULL AND created_at IS NOT NULL`.
 
 Pass-2 equivalent — **applied inside the Spark job** on the BigQuery source
 after Storage Read:
-```
+
+```sql
 WHERE public
   AND repo.id IS NOT NULL
   AND created_at IS NOT NULL
@@ -194,7 +197,7 @@ within recent eras, not as an absolute count. Track OQ-10.
 
 ### OQ-7 production whitelist — era-aware form
 
-```
+```sql
 (type = 'PushEvent')
 OR (type = 'PullRequestEvent'
     AND (action IN ('opened', 'reopened')

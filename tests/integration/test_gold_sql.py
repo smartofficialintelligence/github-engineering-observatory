@@ -58,7 +58,26 @@ def test_synthetic_hour_fully_hand_computed(gold_built):
     assert row["distinct_actors_human"] == 1
     assert row["distinct_repos"] == 1  # everything on alice/repo (id 2)
     assert row["distinct_push_repos"] == 1
+    # v4 columns (all hand-derived from the synthetic events)
+    assert row["pr_events_total"] == 1  # event 3
+    assert row["issues_events_total"] == 0
+    assert row["issues_closed_completed"] == 0
+    assert row["issues_closed_not_planned"] == 0
+    assert row["issues_closed_duplicate"] == 0
+    assert row["issues_closed_unknown"] == 0
+    assert row["reviews_approved"] == 1  # event 5
+    assert row["reviews_changes_requested"] == 0
+    assert row["reviews_commented"] == 0
+    assert row["reviews_dismissed"] == 0
+    assert row["issue_comments_true"] == 0
+    # event 4 is an IssueCommentEvent with issue.pull_request set
+    assert row["issue_comments_on_prs"] == 1
+    assert row["pr_review_comments"] == 0
+    assert row["commit_comments"] == 0
+    # event 6 has assets with download_count 5, 7, and NULL → sum 12
+    assert row["release_download_count_sum"] == 12
     assert row["metric_version"] == gold_metrics.METRIC_DEFINITIONS_VERSION
+    assert row["metric_version"] == 4  # explicit anchor: this test is a v4 test
 
 
 def test_gold_upsert_is_idempotent(gold_built):

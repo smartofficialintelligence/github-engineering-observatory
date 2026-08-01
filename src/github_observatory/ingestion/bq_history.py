@@ -44,11 +44,24 @@ CENSUS_COLUMNS = (
     "distinct_repos", "distinct_push_repos",
 )
 
-# Payload-derived gold columns unavailable from pass 1 (NULL for history).
+# Payload-derived gold columns unavailable from pass 1 (NULL for history
+# until pass-2 lifecycle backfill populates them).
+# Kept in lock-step with gold.metrics.V4_LIFECYCLE_COLUMNS + the pre-v4
+# payload set — any new payload-derived Gold column must be added here.
 PAYLOAD_COLUMNS = (
+    # pre-v4 payload columns
     "production_events", "pr_opened", "pr_merged", "pr_closed_no_merge",
     "pr_reopened", "issues_opened", "issues_closed", "issues_reopened",
     "releases_published",
+    # v4 additions (mirror gold.metrics.V4_LIFECYCLE_COLUMNS)
+    "pr_events_total", "issues_events_total",
+    "issues_closed_completed", "issues_closed_not_planned",
+    "issues_closed_duplicate", "issues_closed_unknown",
+    "reviews_approved", "reviews_changes_requested",
+    "reviews_commented", "reviews_dismissed",
+    "issue_comments_true", "issue_comments_on_prs",
+    "pr_review_comments", "commit_comments",
+    "release_download_count_sum",
 )
 
 BQ_ECOSYSTEM_HOURLY_DDL = (

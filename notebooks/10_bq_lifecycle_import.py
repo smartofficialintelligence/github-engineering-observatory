@@ -11,13 +11,10 @@
 # MAGIC 3. MERGE every year's Parquet into Bronze (idempotent);
 # MAGIC 4. assert the closure-taxonomy and OQ-7 whitelist invariants row-by-row
 # MAGIC    (spec §Validation checks #3, #4 — hard failures);
-# MAGIC 5. print a by-year summary.
-# MAGIC
-# MAGIC Gold-side propagation is NOT done here: the current Gold schema carries
-# MAGIC only 9 of the 34 lifecycle columns. Extending Gold + the stream
-# MAGIC Silver→Gold pipeline to produce the 15 new columns is a separate
-# MAGIC increment (spec §Follow-up). Consumers who need the full 34 columns
-# MAGIC across the decade query `bronze.bq_lifecycle_hourly` directly.
+# MAGIC 5. migrate `gold.ecosystem_hourly` to v4 (15 new columns) and MERGE
+# MAGIC    the pass-2 rows into Gold as `source = 'bigquery'` — stream rows
+# MAGIC    are never modified (mirror of notebook 09's precedence rule);
+# MAGIC 6. print a by-year summary and cross-check parity with pass-1.
 
 # COMMAND ----------
 
@@ -110,9 +107,44 @@ print(f"closure-taxonomy invariant: OK (0 violations)")
 
 # COMMAND ----------
 
-# DBTITLE 1,By-year summary
+# DBTITLE 1,Migrate Gold to v4 (adds 15 lifecycle columns if missing)
+from github_observatory.gold.metrics import (
+    METRIC_DEFINITIONS_VERSION,
+    V4_LIFECYCLE_COLUMNS,
+    create_gold_tables,
+)
+
+gold_columns_before = {
+    f.name for f in spark.table("gold.ecosystem_hourly").schema.fields
+}
+create_gold_tables(spark)
+gold_columns_after = {
+    f.name for f in spark.table("gold.ecosystem_hourly").schema.fields
+}
+added = gold_columns_after - gold_columns_before
+missing_v4 = set(V4_LIFECYCLE_COLUMNS) - gold_columns_after
+assert not missing_v4, f"v4 columns still missing after migration: {missing_v4}"
+print(f"Gold at v{METRIC_DEFINITIONS_VERSION}; added this run: {sorted(added) or 'none'}")
+
+# COMMAND ----------
+
+# DBTITLE 1,Merge lifecycle history into Gold (stream wins)
+from github_observatory.ingestion.bq_lifecycle_history import merge_lifecycle_into_gold
+
 from pyspark.sql import functions as F
 
+stream_before = spark.table("gold.ecosystem_hourly").filter(F.col("source") == "stream").count()
+merge_metrics = merge_lifecycle_into_gold(spark)
+print("gold lifecycle merge:", merge_metrics)
+
+stream_after = spark.table("gold.ecosystem_hourly").filter(F.col("source") == "stream").count()
+assert stream_after == stream_before, (
+    f"stream rows changed by lifecycle merge: {stream_before} -> {stream_after}"
+)
+
+# COMMAND ----------
+
+# DBTITLE 1,By-year summary + census parity with pass-1
 summary = (
     spark.table(BQ_LIFECYCLE_HOURLY_TABLE)
     .groupBy(F.year("event_hour").alias("year"))
@@ -129,18 +161,15 @@ summary = (
 )
 display(summary)
 
-# COMMAND ----------
-
-# DBTITLE 1,Spec §Follow-up reminder
-# MAGIC %md
-# MAGIC ### To make these columns queryable through Gold
-# MAGIC
-# MAGIC Extend `gold.ecosystem_hourly` and the stream Silver→Gold pipeline to
-# MAGIC produce the 15 new columns natively (denominators, closure taxonomy,
-# MAGIC review states, comment classes, release-download sum). Then add a
-# MAGIC follow-on MERGE step in this notebook mirroring notebook 09's
-# MAGIC `merge_history_into_gold` — historical rows carry the new columns,
-# MAGIC stream rows always win on overlap.
-# MAGIC
-# MAGIC Until then, query `bronze.bq_lifecycle_hourly` directly for the full
-# MAGIC 34-column view of any hour across 2016–2025.
+# Cross-check: pass-2 census columns must match pass-1 for overlap hours.
+# Spec §Validation check #2 — any mismatch is a bug in one of the pipelines.
+parity_gaps = spark.sql("""
+    SELECT COUNT(*) AS n
+    FROM github_observatory.bronze.bq_lifecycle_hourly l
+    JOIN github_observatory.bronze.bq_ecosystem_hourly e USING (event_hour)
+    WHERE l.total_events != e.total_events
+       OR l.push_events != e.push_events
+       OR l.bot_events != e.bot_events
+""").collect()[0]["n"]
+assert parity_gaps == 0, f"pass-1 vs pass-2 census parity violated on {parity_gaps} hours"
+print("pass-1/pass-2 census parity: OK (0 divergences)")

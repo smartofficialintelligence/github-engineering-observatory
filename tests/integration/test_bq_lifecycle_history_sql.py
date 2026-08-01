@@ -22,7 +22,7 @@ import os
 
 import pytest
 
-from conftest import config
+from conftest import config, gold_metrics
 import github_observatory.ingestion.bq_lifecycle_history as blh
 
 BENCH_PARQUET_DIR = os.environ.get(
@@ -125,3 +125,82 @@ def test_no_duplicate_event_hours(bench_ingested):
         f" GROUP BY event_hour HAVING COUNT(*) > 1)",
     )
     assert dup["n"] == 0
+
+
+@pytest.fixture(scope="module")
+def gold_after_lifecycle_merge(bench_ingested, ingested):
+    """Ingest bench rows, then merge lifecycle into Gold on top of a
+    Gold state that already has a stream row (from `ingested`). Verifies
+    the stream/bigquery precedence rule end-to-end."""
+    spark, _ = bench_ingested
+    gold_metrics.create_gold_tables(spark)
+    gold_metrics.build_gold(spark)  # ensure the synthetic stream row exists
+    stream_before = spark.sql(
+        f"SELECT COUNT(*) n FROM {config.GOLD_ECOSYSTEM_HOURLY_TABLE}"
+        f" WHERE source = 'stream'"
+    ).collect()[0]["n"]
+    metrics = blh.merge_lifecycle_into_gold(spark)
+    return spark, metrics, stream_before
+
+
+def test_lifecycle_hours_land_in_gold_as_bigquery(gold_after_lifecycle_merge):
+    """Every hour from bronze.bq_lifecycle_hourly appears in Gold with
+    source='bigquery' and matching column values."""
+    spark, _, _ = gold_after_lifecycle_merge
+    # Pick an arbitrary bench hour and verify it landed correctly.
+    row = one(
+        spark,
+        f"SELECT g.source, g.total_events, g.pr_merged,"
+        f" g.issues_closed_completed, g.reviews_approved,"
+        f" g.issue_comments_on_prs, g.release_download_count_sum,"
+        f" b.total_events AS b_total, b.pr_merged AS b_pr_merged,"
+        f" b.issues_closed_completed AS b_icc"
+        f" FROM {config.GOLD_ECOSYSTEM_HOURLY_TABLE} g"
+        f" JOIN {config.BQ_LIFECYCLE_HOURLY_TABLE} b USING (event_hour)"
+        f" WHERE g.event_hour = TIMESTAMP'2023-06-01 00:00:00'",
+    )
+    assert row["source"] == "bigquery"
+    assert row["total_events"] == row["b_total"]
+    assert row["pr_merged"] == row["b_pr_merged"]
+    assert row["issues_closed_completed"] == row["b_icc"]
+
+
+def test_stream_row_untouched_by_lifecycle_merge(gold_after_lifecycle_merge):
+    """The synthetic stream hour (2026-01-01T00) must retain source='stream'
+    and its computed values — bigquery-source merge must not touch it."""
+    spark, _, stream_before = gold_after_lifecycle_merge
+    stream_after = spark.sql(
+        f"SELECT COUNT(*) n FROM {config.GOLD_ECOSYSTEM_HOURLY_TABLE}"
+        f" WHERE source = 'stream'"
+    ).collect()[0]["n"]
+    assert stream_after == stream_before
+
+    row = one(
+        spark,
+        f"SELECT source, total_events, pr_merged, reviews_approved"
+        f" FROM {config.GOLD_ECOSYSTEM_HOURLY_TABLE}"
+        f" WHERE event_hour = TIMESTAMP'2026-01-01 00:00:00'",
+    )
+    assert row["source"] == "stream"
+    assert row["total_events"] == 8  # the hand-computed synthetic value
+    assert row["pr_merged"] == 1
+    assert row["reviews_approved"] == 1
+
+
+def test_lifecycle_merge_is_idempotent(gold_after_lifecycle_merge):
+    """Re-running the merge must not change row count or any value."""
+    spark, _, _ = gold_after_lifecycle_merge
+    before = one(
+        spark,
+        f"SELECT COUNT(*) n, SUM(total_events) t, SUM(pr_merged) p,"
+        f" SUM(release_download_count_sum) r"
+        f" FROM {config.GOLD_ECOSYSTEM_HOURLY_TABLE}",
+    )
+    blh.merge_lifecycle_into_gold(spark)
+    after = one(
+        spark,
+        f"SELECT COUNT(*) n, SUM(total_events) t, SUM(pr_merged) p,"
+        f" SUM(release_download_count_sum) r"
+        f" FROM {config.GOLD_ECOSYSTEM_HOURLY_TABLE}",
+    )
+    assert after == before

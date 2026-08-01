@@ -13,11 +13,20 @@ def _ddl_columns(ddl: str) -> list[str]:
 
 
 def test_merge_select_produces_every_ddl_column():
+    """Every DDL column must be emitted by the merge USING (...) subquery.
+
+    The subquery uses a CTE (base + specialized-table extras) LEFT JOINed;
+    each DDL column shows up either as an `AS <name>` alias in one of the
+    CTEs / the final SELECT, or as a bare qualified reference (`b.<name>`)
+    in the final SELECT.
+    """
     sql = gm.ecosystem_hourly_merge_sql("testrun")
-    select = sql.split("USING (", 1)[1].split("\nFROM ", 1)[0]
-    aliases = set(re.findall(r"AS (\w+)", select))
+    subquery = sql.split("USING (", 1)[1].rsplit(") AS s", 1)[0]
+    aliases = set(re.findall(r"AS (\w+)", subquery))
+    bare_refs = set(re.findall(r"\bb\.(\w+)", subquery))
+    exposed = aliases | bare_refs
     for column in _ddl_columns(gm.ECOSYSTEM_HOURLY_DDL):
-        assert column in aliases, f"{column} missing from merge SELECT"
+        assert column in exposed, f"{column} missing from merge USING subquery"
 
 
 def test_merge_upserts_on_event_hour():

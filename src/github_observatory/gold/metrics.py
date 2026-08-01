@@ -28,6 +28,9 @@ from github_observatory.common.config import (
     GOLD_ECOSYSTEM_HOURLY_TABLE,
     GOLD_ECOSYSTEM_VELOCITY_VIEW,
     SILVER_EVENTS_TABLE,
+    SILVER_ISSUE_EVENTS_TABLE,
+    SILVER_RELEASE_EVENTS_TABLE,
+    SILVER_REVIEW_EVENTS_TABLE,
 )
 
 logger = logging.getLogger("github_observatory.gold")
@@ -42,7 +45,22 @@ PRODUCTION_EVENTS: dict[str, tuple[str, ...] | None] = {
     "ReleaseEvent": ("published",),
 }
 
-METRIC_DEFINITIONS_VERSION = 3
+METRIC_DEFINITIONS_VERSION = 4
+
+# Columns added in v4 (docs/lifecycle_metrics_spec.md v1 + metric_definitions v4):
+# denominators, issue closure taxonomy, review states, three comment classes,
+# release download sum. Historical rows carry NULL for these until pass-2
+# (bronze.bq_lifecycle_hourly) is merged in.
+V4_LIFECYCLE_COLUMNS = (
+    "pr_events_total", "issues_events_total",
+    "issues_closed_completed", "issues_closed_not_planned",
+    "issues_closed_duplicate", "issues_closed_unknown",
+    "reviews_approved", "reviews_changes_requested",
+    "reviews_commented", "reviews_dismissed",
+    "issue_comments_true", "issue_comments_on_prs",
+    "pr_review_comments", "commit_comments",
+    "release_download_count_sum",
+)
 
 ECOSYSTEM_HOURLY_DDL = (
     "event_hour TIMESTAMP, "
@@ -56,6 +74,7 @@ ECOSYSTEM_HOURLY_DDL = (
     "bot_events BIGINT, "
     "distinct_actors BIGINT, distinct_actors_human BIGINT, "
     "distinct_repos BIGINT, distinct_push_repos BIGINT, "
+    + ", ".join(f"{c} BIGINT" for c in V4_LIFECYCLE_COLUMNS) + ", "
     "metric_version INT, gold_run_id STRING, gold_built_at TIMESTAMP, "
     "source STRING"
 )
@@ -80,8 +99,19 @@ def _count_if(condition: str) -> str:
 
 
 def ecosystem_hourly_merge_sql(run_id: str, where: str = "TRUE") -> str:
+    """Aggregate silver.events (base) and LEFT JOIN per-hour counts from
+    the specialized silver tables (issue_events, review_events,
+    release_events) to compute the v4 columns.
+
+    The specialized tables don't carry quality_flag today — Silver's own
+    filter (event_type + key-field presence) drops the same set as
+    silver.events for the payload-derived columns we care about. Filter
+    on ``created_at IS NOT NULL`` mirrors the base filter modulo
+    quality_flag; Finding-S6 non-public events do not appear in the
+    specialized tables (they're ForkEvents, not issue/review/release).
+    """
     prod = production_event_sql()
-    select = f"""
+    base = f"""
 SELECT
     date_trunc('HOUR', created_at) AS event_hour,
     COUNT(*) AS total_events,
@@ -102,15 +132,94 @@ SELECT
     COUNT(DISTINCT CASE WHEN NOT actor_is_bot THEN actor_id END) AS distinct_actors_human,
     COUNT(DISTINCT repo_id) AS distinct_repos,
     COUNT(DISTINCT CASE WHEN event_type = 'PushEvent' THEN repo_id END) AS distinct_push_repos,
-    {METRIC_DEFINITIONS_VERSION} AS metric_version,
-    '{run_id}' AS gold_run_id,
-    current_timestamp() AS gold_built_at,
-    'stream' AS source
+    -- v4 counts computable from silver.events alone
+    {_count_if("event_type = 'PullRequestEvent'")} AS pr_events_total,
+    {_count_if("event_type = 'IssuesEvent'")} AS issues_events_total,
+    {_count_if("event_type = 'PullRequestReviewCommentEvent'")} AS pr_review_comments,
+    {_count_if("event_type = 'CommitCommentEvent'")} AS commit_comments
 FROM {SILVER_EVENTS_TABLE}
 WHERE quality_flag IS NULL
   AND created_at IS NOT NULL
   AND ({where})
 GROUP BY date_trunc('HOUR', created_at)"""
+
+    issue_extras = f"""
+SELECT
+    date_trunc('HOUR', created_at) AS event_hour,
+    {_count_if("event_type = 'IssuesEvent' AND action = 'closed'"
+               " AND issue_state_reason = 'completed'")} AS issues_closed_completed,
+    {_count_if("event_type = 'IssuesEvent' AND action = 'closed'"
+               " AND issue_state_reason = 'not_planned'")} AS issues_closed_not_planned,
+    {_count_if("event_type = 'IssuesEvent' AND action = 'closed'"
+               " AND issue_state_reason = 'duplicate'")} AS issues_closed_duplicate,
+    {_count_if("event_type = 'IssuesEvent' AND action = 'closed'"
+               " AND (issue_state_reason IS NULL"
+               " OR issue_state_reason NOT IN ('completed', 'not_planned', 'duplicate'))")}
+        AS issues_closed_unknown,
+    {_count_if("event_type = 'IssueCommentEvent' AND NOT is_pull_request")} AS issue_comments_true,
+    {_count_if("event_type = 'IssueCommentEvent' AND is_pull_request")} AS issue_comments_on_prs
+FROM {SILVER_ISSUE_EVENTS_TABLE}
+WHERE created_at IS NOT NULL AND ({where})
+GROUP BY date_trunc('HOUR', created_at)"""
+
+    review_extras = f"""
+SELECT
+    date_trunc('HOUR', created_at) AS event_hour,
+    {_count_if("review_state = 'approved'")} AS reviews_approved,
+    {_count_if("review_state = 'changes_requested'")} AS reviews_changes_requested,
+    {_count_if("review_state = 'commented'")} AS reviews_commented,
+    {_count_if("review_state = 'dismissed'")} AS reviews_dismissed
+FROM {SILVER_REVIEW_EVENTS_TABLE}
+WHERE created_at IS NOT NULL AND ({where})
+GROUP BY date_trunc('HOUR', created_at)"""
+
+    release_extras = f"""
+SELECT
+    date_trunc('HOUR', created_at) AS event_hour,
+    SUM(assets_download_count) AS release_download_count_sum
+FROM {SILVER_RELEASE_EVENTS_TABLE}
+WHERE created_at IS NOT NULL AND ({where})
+GROUP BY date_trunc('HOUR', created_at)"""
+
+    select = f"""
+WITH base AS ({base}),
+     issue_extras AS ({issue_extras}),
+     review_extras AS ({review_extras}),
+     release_extras AS ({release_extras})
+SELECT
+    b.event_hour,
+    b.total_events, b.total_events_human,
+    b.push_events, b.push_events_human,
+    b.production_events,
+    b.pr_opened, b.pr_merged, b.pr_closed_no_merge, b.pr_reopened,
+    b.issues_opened, b.issues_closed, b.issues_reopened,
+    b.releases_published,
+    b.bot_events,
+    b.distinct_actors, b.distinct_actors_human,
+    b.distinct_repos, b.distinct_push_repos,
+    b.pr_events_total, b.issues_events_total,
+    IFNULL(ie.issues_closed_completed, 0) AS issues_closed_completed,
+    IFNULL(ie.issues_closed_not_planned, 0) AS issues_closed_not_planned,
+    IFNULL(ie.issues_closed_duplicate, 0) AS issues_closed_duplicate,
+    IFNULL(ie.issues_closed_unknown, 0) AS issues_closed_unknown,
+    IFNULL(rv.reviews_approved, 0) AS reviews_approved,
+    IFNULL(rv.reviews_changes_requested, 0) AS reviews_changes_requested,
+    IFNULL(rv.reviews_commented, 0) AS reviews_commented,
+    IFNULL(rv.reviews_dismissed, 0) AS reviews_dismissed,
+    IFNULL(ie.issue_comments_true, 0) AS issue_comments_true,
+    IFNULL(ie.issue_comments_on_prs, 0) AS issue_comments_on_prs,
+    b.pr_review_comments,
+    b.commit_comments,
+    IFNULL(rl.release_download_count_sum, 0) AS release_download_count_sum,
+    {METRIC_DEFINITIONS_VERSION} AS metric_version,
+    '{run_id}' AS gold_run_id,
+    current_timestamp() AS gold_built_at,
+    'stream' AS source
+FROM base b
+LEFT JOIN issue_extras ie USING (event_hour)
+LEFT JOIN review_extras rv USING (event_hour)
+LEFT JOIN release_extras rl USING (event_hour)"""
+
     return (
         f"MERGE INTO {GOLD_ECOSYSTEM_HOURLY_TABLE} AS t\n"
         f"USING (\n{select}\n) AS s\n"
@@ -155,9 +264,12 @@ def ecosystem_velocity_view_sql() -> str:
 def create_gold_tables(spark: Any) -> None:
     """Create the Gold table and (re)create the velocity view.
 
-    Also migrates pre-v3 tables in place: adds the ``source`` column and
-    backfills existing rows as 'stream' (all pre-v3 rows were
-    stream-computed).
+    Idempotent forward migrations:
+      * v3: adds ``source`` column, backfills existing rows as 'stream'
+      * v4: adds the 15 lifecycle columns (denominators, closure
+        taxonomy, review states, comment classes, release-download sum);
+        existing rows carry NULL until the next Gold rebuild (stream) or
+        lifecycle history merge (bigquery source).
     """
     spark.sql(
         f"CREATE TABLE IF NOT EXISTS {GOLD_ECOSYSTEM_HOURLY_TABLE} "
@@ -170,6 +282,15 @@ def create_gold_tables(spark: Any) -> None:
     spark.sql(
         f"UPDATE {GOLD_ECOSYSTEM_HOURLY_TABLE} SET source = 'stream' WHERE source IS NULL"
     )
+    # v4: add lifecycle columns missing on pre-v4 tables. NULL for existing
+    # rows is intentional — next rebuild fills stream rows; historical rows
+    # get filled by ingestion.bq_lifecycle_history.merge_lifecycle_into_gold.
+    missing_v4 = [c for c in V4_LIFECYCLE_COLUMNS if c not in columns]
+    if missing_v4:
+        cols_sql = ", ".join(f"{c} BIGINT" for c in missing_v4)
+        spark.sql(f"ALTER TABLE {GOLD_ECOSYSTEM_HOURLY_TABLE} ADD COLUMNS ({cols_sql})")
+        logger.info("added v4 lifecycle columns to %s: %s",
+                    GOLD_ECOSYSTEM_HOURLY_TABLE, missing_v4)
     spark.sql(ecosystem_velocity_view_sql())
 
 
