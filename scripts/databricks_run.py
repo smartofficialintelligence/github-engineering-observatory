@@ -321,18 +321,29 @@ def cmd_upload(args: argparse.Namespace) -> int:
     dest = args.dest.rstrip("/")
     if not dest.startswith("/Volumes/"):
         sys.exit(f"--dest must be a /Volumes/... path, got {dest}")
-    for local in args.files:
-        name = os.path.basename(local)
-        with open(local, "rb") as fh:
+
+    def _upload_one(local_path: str, remote_relpath: str) -> None:
+        with open(local_path, "rb") as fh:
             data = fh.read()
-        encoded = urllib.parse.quote(f"{dest}/{name}")
+        encoded = urllib.parse.quote(f"{dest}/{remote_relpath}")
         api(
             "PUT", f"/api/2.0/fs/files{encoded}",
             raw_body=data,
             content_type="application/octet-stream",
             query={"overwrite": "true"},
         )
-        print(f"uploaded {local} -> {dest}/{name} ({len(data):,} bytes)")
+        print(f"uploaded {local_path} -> {dest}/{remote_relpath} ({len(data):,} bytes)")
+
+    for local in args.files:
+        if os.path.isdir(local):
+            # Recurse; preserve directory structure relative to the arg.
+            for root, _, filenames in os.walk(local):
+                for name in sorted(filenames):
+                    full = os.path.join(root, name)
+                    rel = os.path.relpath(full, os.path.dirname(local.rstrip("/")))
+                    _upload_one(full, rel)
+        else:
+            _upload_one(local, os.path.basename(local))
     return 0
 
 
