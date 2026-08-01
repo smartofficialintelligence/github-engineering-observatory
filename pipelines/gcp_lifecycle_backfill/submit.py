@@ -62,11 +62,15 @@ def submit_batch(
     job_args: list[str],
     service_account: str | None,
     subnet: str | None,
+    ttl: str,
 ) -> dict:
     """Submit one PySpark batch. ``gcloud batches submit`` blocks until
     the batch reaches a terminal state, so this call is synchronous.
     Returns the parsed batch resource.
     """
+    # Dataproc Serverless has a default TTL of 4h — insufficient for
+    # year-length batches. Set explicitly. Cost billed on DCU-seconds
+    # regardless of TTL, so no downside to a generous cap.
     args = [
         "gcloud", "dataproc", "batches", "submit", "pyspark",
         pyfile_gs,
@@ -75,6 +79,7 @@ def submit_batch(
         f"--batch={batch_id}",
         f"--version={DATAPROC_RUNTIME_VERSION}",
         f"--deps-bucket=gs://{deps_bucket}",
+        f"--ttl={ttl}",
     ]
     if service_account:
         args.append(f"--service-account={service_account}")
@@ -186,6 +191,7 @@ def run_one(*, year: int, month: int | None, args: argparse.Namespace,
         project=args.project, region=args.region, batch_id=batch_id,
         pyfile_gs=pyfile_gs, deps_bucket=args.bucket, job_args=job_args,
         service_account=args.service_account, subnet=args.subnet,
+        ttl=args.ttl,
     )
     summary = batch_summary(batch)
     summary.update({
@@ -236,6 +242,10 @@ def build_argparser() -> argparse.ArgumentParser:
                         help="service account for the batch (else compute default)")
     common.add_argument("--subnet", default=None,
                         help="VPC subnet URI if project requires it")
+    common.add_argument("--ttl", default="12h",
+                        help="Dataproc batch TTL (default 12h; bench month ran"
+                        " in <1h so this is generous). Cost is DCU-seconds"
+                        " billed regardless of TTL — set high enough to finish.")
 
     subs = p.add_subparsers(dest="cmd", required=True)
 
