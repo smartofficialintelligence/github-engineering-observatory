@@ -509,7 +509,7 @@ HEALTH = {
             SELECT COUNT(*) AS violations FROM {G}.data_quality
             WHERE NOT parity_ok OR duplicate_event_ids > 0"""),
         dataset("ingest_trend", f"""
-            SELECT CAST(source_hour AS DATE) AS day,
+            SELECT source_hour AS event_hour,
                    COUNT(*) AS files, SUM(bronze_rows) AS events
             FROM {G}.data_quality GROUP BY 1"""),
     ],
@@ -531,9 +531,9 @@ HEALTH = {
                        table_enc(["layer", "rows"]), (4, 0, 2, 4),
                        fields=[field("layer"), field("rows")]),
                 widget("ingest_volume", "ingest_trend", "bar",
-                       "Events ingested per day",
-                       line_enc("day", "events"), (0, 4, 6, 6),
-                       fields=[field("day"), field("events")]),
+                       "Events ingested per hour",
+                       line_enc("event_hour", "events"), (0, 4, 6, 6),
+                       fields=[field("event_hour"), field("events")]),
                 widget("dq_table", "dq", "table",
                        "Per-file conservation checks (latest 200)",
                        table_enc(["source_hour", "source_file", "bronze_rows",

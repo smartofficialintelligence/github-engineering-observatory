@@ -32,7 +32,7 @@
       "name": "ingest_trend",
       "displayName": "ingest_trend",
       "queryLines": [
-        "\n            SELECT CAST(source_hour AS DATE) AS day,\n                   COUNT(*) AS files, SUM(bronze_rows) AS events\n            FROM github_observatory.gold.data_quality GROUP BY 1"
+        "\n            SELECT source_hour AS event_hour,\n                   COUNT(*) AS files, SUM(bronze_rows) AS events\n            FROM github_observatory.gold.data_quality GROUP BY 1"
       ]
     }
   ],
@@ -194,8 +194,8 @@
                   "disaggregated": false,
                   "fields": [
                     {
-                      "name": "day",
-                      "expression": "`day`"
+                      "name": "event_hour",
+                      "expression": "`event_hour`"
                     },
                     {
                       "name": "events",
@@ -209,16 +209,16 @@
               "version": 3,
               "widgetType": "bar",
               "frame": {
-                "title": "Events ingested per day",
+                "title": "Events ingested per hour",
                 "showTitle": true
               },
               "encodings": {
                 "x": {
-                  "fieldName": "day",
+                  "fieldName": "event_hour",
                   "scale": {
                     "type": "temporal"
                   },
-                  "displayName": "day"
+                  "displayName": "event_hour"
                 },
                 "y": {
                   "fieldName": "events",
