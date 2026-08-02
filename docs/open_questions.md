@@ -36,6 +36,30 @@ need care. The BigQuery mirror is faithful to the archive: hour
 2025-07-15T15 matches to the event (164,140 events / 98,194 pushes in
 both), so the steps are upstream of all collection.
 
+*Payload stripping in the filtered era (2026-08-02, from the pass-2
+lifecycle bench and follow-up BQ audit of `githubarchive.day.20251115`):*
+the filter strips more than event counts — it slims the surviving
+PullRequestEvent payload to five fields (`id`, `number`, `url`, `base`,
+`head`) with no `merged`, `merged_at`, `merged_by`, `state`, `closed_at`,
+or `draft`, AND drops `action='merged'` events entirely (0 of 211,311
+PR events on 2025-11-15). The pre-2026 merge signal
+(`action='closed' AND pull_request.merged=true`) is therefore
+unrecoverable for the June-2025-through-2026-restoration window: both
+branches of our era-aware detector are dead. `MergeGroupEvent` is not
+present in the archive to compensate. Pass-2 flags affected batches
+with `pr_merge_signal_stripped=TRUE` (spec §Era-awareness); consumers
+must filter that flag before trusting `pr_merged`/`pr_closed_no_merge`
+for those hours. Related enrichment paths (GitHub REST API for a
+sampled repo panel; PushEvent SHA correlation) are open — tracked in
+OQ-10 as adoption-signal enrichment.
+
+*Restoration date unknown:* the 2026 stream samples (2026-07-26, -29)
+show `action='merged'` present again (172 in three hours), so the
+filter's merge stripping was reversed between 2025-11-15 and 2026-07-26.
+The exact restoration date matters for narrowing the NULL era; a small
+BQ probe on `githubarchive.day.202603XX` / `.202604XX` (<$0.02 each)
+can pin it down.
+
 ## OQ-2 — Does PullRequestEvent `action='closed'` now mean closed-without-merge?
 
 2026 introduces `action='merged'` (172 in sample) alongside `closed` (12);

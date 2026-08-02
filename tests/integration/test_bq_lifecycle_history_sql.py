@@ -33,12 +33,24 @@ BENCH_PARQUET_DIR = os.environ.get(
 
 
 @pytest.fixture(scope="module")
-def bench_ingested(spark):
+def bench_ingested(spark, tmp_path_factory):
+    """Ingest the 2023-06 bench Parquet. Injects the v2
+    ``pr_merge_signal_stripped`` column since the on-disk bench Parquet
+    was written before v2 shipped — 2023-06 is in the non-stripped era,
+    so the injected value is False."""
     if not os.path.isdir(BENCH_PARQUET_DIR):
         pytest.skip(f"bench parquet not available at {BENCH_PARQUET_DIR}")
+    from pyspark.sql import functions as F
+
+    tmp_dir = str(tmp_path_factory.mktemp("bench_v2_shim"))
+    (
+        spark.read.parquet(BENCH_PARQUET_DIR)
+        .withColumn("pr_merge_signal_stripped", F.lit(False))
+        .write.mode("overwrite").parquet(tmp_dir)
+    )
     blh.create_bq_lifecycle_tables(spark)
-    metrics = blh.ingest_bronze_from_parquet(spark, BENCH_PARQUET_DIR)
-    return spark, metrics
+    metrics = blh.ingest_bronze_from_parquet(spark, tmp_dir)
+    return spark, metrics, tmp_dir
 
 
 def one(spark, sql):
@@ -48,14 +60,14 @@ def one(spark, sql):
 
 
 def test_row_count_matches_bench(bench_ingested):
-    spark, _ = bench_ingested
+    spark, _, _ = bench_ingested
     row = one(spark, f"SELECT COUNT(*) n FROM {config.BQ_LIFECYCLE_HOURLY_TABLE}")
     # 715 hours = 720 (24 × 30 June days) minus 5 real GH Archive gaps
     assert row["n"] == 715
 
 
 def test_provenance_populated(bench_ingested):
-    spark, _ = bench_ingested
+    spark, _, _ = bench_ingested
     row = one(
         spark,
         f"SELECT source_year, metric_spec_version, extract_job_id IS NOT NULL AS eid_set,"
@@ -64,13 +76,15 @@ def test_provenance_populated(bench_ingested):
         f" FROM {config.BQ_LIFECYCLE_HOURLY_TABLE} LIMIT 1",
     )
     assert row["source_year"] == 2023
-    assert row["metric_spec_version"] == blh.METRIC_SPEC_VERSION
+    # metric_spec_version reflects the extract's version, not the current
+    # module version — the on-disk bench Parquet is a v1 extract.
+    assert row["metric_spec_version"] in (1, blh.METRIC_SPEC_VERSION)
     assert row["eid_set"] and row["eat_set"] and row["irid_set"] and row["iat_set"]
 
 
 def test_closure_taxonomy_sum_invariant(bench_ingested):
     """Spec §Validation check #4: split columns sum to issues_closed."""
-    spark, _ = bench_ingested
+    spark, _, _ = bench_ingested
     bad = one(
         spark,
         f"SELECT COUNT(*) n FROM {config.BQ_LIFECYCLE_HOURLY_TABLE}"
@@ -84,7 +98,7 @@ def test_closure_taxonomy_sum_invariant(bench_ingested):
 def test_whitelist_sum_invariant(bench_ingested):
     """Spec §Validation check #3: production_events = pushes + PR-lifecycle
     + issue-lifecycle + releases."""
-    spark, _ = bench_ingested
+    spark, _, _ = bench_ingested
     bad = one(
         spark,
         f"SELECT COUNT(*) n FROM {config.BQ_LIFECYCLE_HOURLY_TABLE}"
@@ -99,14 +113,14 @@ def test_whitelist_sum_invariant(bench_ingested):
 
 def test_reingest_is_idempotent(bench_ingested):
     """Re-ingest must not change value columns; row count identical."""
-    spark, _ = bench_ingested
+    spark, _, tmp_dir = bench_ingested
     before = one(
         spark,
         f"SELECT COUNT(*) n, SUM(total_events) s, SUM(pr_merged) p,"
         f" SUM(issues_closed_completed) ic"
         f" FROM {config.BQ_LIFECYCLE_HOURLY_TABLE}",
     )
-    blh.ingest_bronze_from_parquet(spark, BENCH_PARQUET_DIR)
+    blh.ingest_bronze_from_parquet(spark, tmp_dir)
     after = one(
         spark,
         f"SELECT COUNT(*) n, SUM(total_events) s, SUM(pr_merged) p,"
@@ -116,8 +130,20 @@ def test_reingest_is_idempotent(bench_ingested):
     assert after == before
 
 
+def test_signal_stripped_column_present_and_false_for_2023(bench_ingested):
+    """v2 data-quality flag: 2023-06 is in the non-stripped era."""
+    spark, _, _ = bench_ingested
+    row = one(
+        spark,
+        f"SELECT COUNT(*) AS n, COUNT_IF(pr_merge_signal_stripped) AS n_stripped"
+        f" FROM {config.BQ_LIFECYCLE_HOURLY_TABLE}",
+    )
+    assert row["n"] == 715
+    assert row["n_stripped"] == 0
+
+
 def test_no_duplicate_event_hours(bench_ingested):
-    spark, _ = bench_ingested
+    spark, _, _ = bench_ingested
     dup = one(
         spark,
         f"SELECT COUNT(*) n FROM ("
@@ -132,7 +158,7 @@ def gold_after_lifecycle_merge(bench_ingested, ingested):
     """Ingest bench rows, then merge lifecycle into Gold on top of a
     Gold state that already has a stream row (from `ingested`). Verifies
     the stream/bigquery precedence rule end-to-end."""
-    spark, _ = bench_ingested
+    spark, _, _ = bench_ingested
     gold_metrics.create_gold_tables(spark)
     gold_metrics.build_gold(spark)  # ensure the synthetic stream row exists
     stream_before = spark.sql(

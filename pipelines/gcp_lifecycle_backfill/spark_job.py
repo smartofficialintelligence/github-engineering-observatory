@@ -20,7 +20,20 @@ import argparse
 import json
 import sys
 
-METRIC_SPEC_VERSION = 1
+# v2 (2026-08-02): adds pr_merge_signal_stripped batch-detected flag —
+# a real property of the GH Archive stream from ~June 2025 through the
+# 2026 restoration, where PullRequestEvent payloads no longer carry
+# `merged` action or `pull_request.merged` field, making pr_merged
+# structurally unrecoverable. See docs/lifecycle_metrics_spec.md v2.
+METRIC_SPEC_VERSION = 2
+
+# Threshold used to distinguish "no merges happened" (real quiet period)
+# from "signal stripped" (post-June-2025 filter era). If a batch has more
+# than this many PullRequestEvents AND zero merges, we call it stripped.
+# 10k events is well below any plausible full-month PR volume, and any
+# real month with real merges will have hundreds of thousands of PR events
+# and thousands of merges.
+STRIPPED_SIGNAL_MIN_PR_EVENTS = 10_000
 
 # Projected columns pulled from the BigQuery table via Storage Read API.
 # Nested fields addressed via struct notation; the connector pushes down.
@@ -215,12 +228,36 @@ def run(args: argparse.Namespace) -> int:
         df.createOrReplaceTempView("events")
         agg = spark.sql(aggregate_sql("events"))
 
-        # Provenance columns
         from pyspark.sql import functions as F
 
+        # Batch-level probe: does the GH Archive stream have the PR merge
+        # signal for this batch's window? Post-June-2025 through the 2026
+        # restoration, the archive strips both action='merged' AND the
+        # pull_request.merged payload field, so pr_merged is stuck at 0
+        # for reasons that are a real data property, not a pipeline bug.
+        # Flagging the batch preserves the raw counts (0 is what the
+        # archive contains) while letting consumers filter honestly.
+        totals = agg.agg(
+            F.sum("pr_merged").alias("total_merged"),
+            F.sum("pr_events_total").alias("total_pr_events"),
+        ).collect()[0]
+        total_merged = int(totals["total_merged"] or 0)
+        total_pr_events = int(totals["total_pr_events"] or 0)
+        signal_stripped = (
+            total_pr_events > STRIPPED_SIGNAL_MIN_PR_EVENTS
+            and total_merged == 0
+        )
+        if signal_stripped:
+            print(f"WARNING: pr_merge_signal_stripped=TRUE for this batch "
+                  f"(pr_events_total={total_pr_events:,} pr_merged=0). "
+                  f"pr_merged/pr_closed_no_merge are unreliable — see spec §Era.",
+                  file=sys.stderr)
+
+        # Provenance + data-quality columns
         agg = (
             agg.withColumn("source_year", F.lit(args.year))
             .withColumn("metric_spec_version", F.lit(METRIC_SPEC_VERSION))
+            .withColumn("pr_merge_signal_stripped", F.lit(signal_stripped))
             .withColumn("ingested_at", F.current_timestamp())
             .withColumn("job_id", F.lit(args.job_id or "local"))
         )
@@ -242,6 +279,7 @@ def run(args: argparse.Namespace) -> int:
             "hourly_rows": n,
             "output": out_path,
             "metric_spec_version": METRIC_SPEC_VERSION,
+            "pr_merge_signal_stripped": signal_stripped,
         }))
         return 0
     finally:

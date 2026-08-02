@@ -32,7 +32,7 @@ from github_observatory.common.config import (
 
 logger = logging.getLogger("github_observatory.bq_lifecycle_history")
 
-METRIC_SPEC_VERSION = 1
+METRIC_SPEC_VERSION = 2  # v2: adds pr_merge_signal_stripped column
 
 # 34 aggregate columns produced by pipelines/gcp_lifecycle_backfill/spark_job.py.
 # Order matters only for the DDL — MERGE stages by name.
@@ -74,6 +74,12 @@ PROVENANCE_FROM_EXTRACT = ("source_year", "metric_spec_version", "job_id")
 BQ_LIFECYCLE_HOURLY_DDL = (
     "event_hour TIMESTAMP, "
     + ", ".join(f"{c} BIGINT" for c in ALL_METRIC_COLUMNS) + ", "
+    # v2 data-quality flag: TRUE when the batch containing this hour had
+    # its PR merge signal stripped by the OQ-1 upstream filter. When TRUE,
+    # pr_merged (always 0) and pr_closed_no_merge (over-counted) are
+    # unreliable — filter with WHERE NOT pr_merge_signal_stripped when
+    # querying those two columns.
+    "pr_merge_signal_stripped BOOLEAN, "
     "source_year INT, metric_spec_version INT, "
     "extract_job_id STRING, extracted_at TIMESTAMP, "
     "import_run_id STRING, imported_at TIMESTAMP"
@@ -89,7 +95,11 @@ def create_bq_lifecycle_tables(spark: Any) -> None:
 
 def _validate_input_schema(df: Any) -> None:
     """Sanity-check the Parquet schema before MERGE."""
-    missing = set(ALL_METRIC_COLUMNS + ("event_hour",) + PROVENANCE_FROM_EXTRACT) - set(df.columns)
+    required = set(
+        ALL_METRIC_COLUMNS + ("event_hour", "pr_merge_signal_stripped")
+        + PROVENANCE_FROM_EXTRACT
+    )
+    missing = required - set(df.columns)
     if missing:
         raise ValueError(
             f"Parquet input missing required columns: {sorted(missing)}"
@@ -119,6 +129,7 @@ def ingest_bronze_from_parquet(
         df.selectExpr(
             "CAST(event_hour AS TIMESTAMP) AS event_hour",
             *ALL_METRIC_COLUMNS,
+            "CAST(pr_merge_signal_stripped AS BOOLEAN) AS pr_merge_signal_stripped",
             "CAST(source_year AS INT) AS source_year",
             "CAST(metric_spec_version AS INT) AS metric_spec_version",
             "CAST(job_id AS STRING) AS extract_job_id",
@@ -132,6 +143,7 @@ def ingest_bronze_from_parquet(
             MERGE INTO {BQ_LIFECYCLE_HOURLY_TABLE} AS t
             USING (
                 SELECT event_hour, {metric_cols_csv},
+                       pr_merge_signal_stripped,
                        source_year, metric_spec_version, extract_job_id, extracted_at,
                        '{run_id}' AS import_run_id,
                        current_timestamp() AS imported_at

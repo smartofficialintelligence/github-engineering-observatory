@@ -1,6 +1,7 @@
 # Lifecycle Metrics — Pass-2 Backfill Spec
 
-**Version 1** (2026-08-01). Governs the decade-scale (2016–2025) payload-derived
+**Version 2** (2026-08-02). Adds `pr_merge_signal_stripped` batch-detected
+data-quality flag (see §Era-awareness). v1 was 2026-08-01 initial spec. Governs the decade-scale (2016–2025) payload-derived
 hourly aggregates produced by `pipelines/gcp_lifecycle_backfill/`. Every column
 here binds a `github_observatory.gold.ecosystem_hourly` column of the same name;
 stream-computed rows (produced from `silver.events` — see
@@ -87,13 +88,39 @@ Bucket on `TIMESTAMP_TRUNC(created_at, HOUR)`. Matches stream Gold's
 Two payload-shape changes cross the backfill window; the extractions handle
 both eras in one expression:
 
-**PR merged signal (OQ-5).** Pre-2026, `merged` was
-`action='closed' AND pull_request.merged=true`. In the 2026 stream,
-`action='merged'` is a dedicated value and `pull_request.merged` is gone.
-Both are counted as `pr_merged`; `closed AND NOT merged=true` (pre-2026) or
-`action='closed'` (2026) counts as `pr_closed_no_merge`. See
-`metric_definitions.md` `pr_merged` / `pr_closed_no_merge` rows for the
-contract; OQ-2 caveats the disjointness assumption for the 2026 stream.
+**PR merged signal (OQ-5).** Three eras, one expression:
+
+* **Pre-June-2025**: `merged` was `action='closed' AND pull_request.merged=true`.
+* **June-2025 → ~2026 restoration**: **archive strips BOTH signals**. The
+  `pull_request` object on `PullRequestEvent` is slimmed to 5 fields (`id`,
+  `number`, `url`, `base`, `head`) with no `merged`/`merged_at`/`merged_by`
+  and no `action='merged'` events. Confirmed 2026-08-02 via BQ audit of
+  `githubarchive.day.20251115`: 211,311 PR events, 0 with `merged`
+  action, 0 with `pull_request.merged` field present.
+* **2026 stream (2026-07 onward)**: `action='merged'` restored as a
+  dedicated action value; `pull_request.merged` still absent.
+
+The era-aware expression
+`(action='merged' OR (action='closed' AND merged=true))` handles the
+first and third eras correctly but returns **zero** during the
+signal-stripped middle era — because both branches are dead in that data,
+not because no merges happened. `pr_closed_no_merge` correspondingly
+**over-counts** during that era (all `action='closed'` fall into it,
+including former merges).
+
+Rather than hardcode a date boundary, the Spark job **probes each batch**
+and emits a per-row boolean `pr_merge_signal_stripped`:
+
+* Batch total `pr_events_total > 10,000` AND batch total `pr_merged = 0`
+  → `pr_merge_signal_stripped = TRUE` for every row in the batch.
+* Otherwise → `pr_merge_signal_stripped = FALSE`.
+
+Consumer contract: filter `WHERE NOT pr_merge_signal_stripped` before
+using `pr_merged` or `pr_closed_no_merge`. All other columns remain
+valid in the stripped era (issue lifecycle, review states, comments,
+releases, census counts are unaffected). See `metric_definitions.md`
+`pr_merged` / `pr_closed_no_merge` rows for the contract; OQ-2
+caveats the disjointness assumption for eras 1 and 3.
 
 **Issue closure reason.** `payload.issue.state_reason` was introduced by
 GitHub in **September 2022** — pre-2022 issue closures will all have
@@ -226,7 +253,8 @@ the pre-2026 branches add zero rows there. This form matches
 - Comment activity (new): 4 cols
 - Release adoption (new): 1 col
 
-**Total: 34 columns per hourly row** (plus provenance columns: `source_year`,
+**Total: 34 columns per hourly row** (plus one data-quality flag:
+`pr_merge_signal_stripped BOOLEAN`, and provenance columns: `source_year`,
 `ingested_at`, `job_id`, `metric_spec_version`).
 
 ## Follow-up: stream pipeline alignment
@@ -273,3 +301,4 @@ Any check failing on the bench month blocks the full backfill.
 | Version | Date | Change |
 | --- | --- | --- |
 | 1 | 2026-08-01 | Initial spec; 34-column output; block-out logic mirrors stream Silver/Gold; era-aware PR merge; issue state_reason; review states; three comment classes; release download sum |
+| 2 | 2026-08-02 | Added `pr_merge_signal_stripped` BOOLEAN per-row flag. Middle era (June-2025 → 2026 restoration) confirmed by BQ audit to strip ALL PR merge signals from the archive, making `pr_merged`/`pr_closed_no_merge` structurally unrecoverable for that window. Batch-level probe emits the flag; consumers filter `WHERE NOT pr_merge_signal_stripped` for those two columns. `METRIC_SPEC_VERSION = 2`. |

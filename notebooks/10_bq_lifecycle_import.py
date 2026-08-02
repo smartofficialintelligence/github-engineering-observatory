@@ -78,6 +78,10 @@ print(f"\ningested {len(year_dirs)} year(s) into {BQ_LIFECYCLE_HOURLY_TABLE}")
 # COMMAND ----------
 
 # DBTITLE 1,Spec §Validation check #3 — OQ-7 whitelist sum invariant
+# NB: for signal-stripped hours, pr_merged=0 and pr_closed_no_merge counts
+# all closed PRs. The whitelist arithmetic still holds because production_events
+# and the raw column values are internally consistent — signal_stripped is a
+# separate flag about the meaning, not a violation of the arithmetic.
 whitelist_violations = spark.sql(f"""
     SELECT COUNT(*) AS n FROM {BQ_LIFECYCLE_HOURLY_TABLE}
     WHERE production_events !=
@@ -90,6 +94,28 @@ assert whitelist_violations == 0, (
     f"OQ-7 whitelist sum invariant violated on {whitelist_violations} hours"
 )
 print(f"OQ-7 whitelist invariant: OK (0 violations)")
+
+# COMMAND ----------
+
+# DBTITLE 1,Data-quality report — signal-stripped era coverage
+stripped_rows = spark.sql(f"""
+    SELECT
+        COUNT(*) AS total_rows,
+        COUNT_IF(pr_merge_signal_stripped) AS signal_stripped_rows,
+        MIN(CASE WHEN pr_merge_signal_stripped THEN event_hour END) AS first_stripped_hour,
+        MAX(CASE WHEN pr_merge_signal_stripped THEN event_hour END) AS last_stripped_hour
+    FROM {BQ_LIFECYCLE_HOURLY_TABLE}
+""").collect()[0].asDict()
+if stripped_rows["signal_stripped_rows"] > 0:
+    pct = 100.0 * stripped_rows["signal_stripped_rows"] / stripped_rows["total_rows"]
+    print(f"pr_merge_signal_stripped=TRUE on {stripped_rows['signal_stripped_rows']:,}"
+          f" of {stripped_rows['total_rows']:,} hours ({pct:.1f}%),"
+          f" from {stripped_rows['first_stripped_hour']} to"
+          f" {stripped_rows['last_stripped_hour']}."
+          f" WHERE NOT pr_merge_signal_stripped when querying pr_merged /"
+          f" pr_closed_no_merge for those rows.")
+else:
+    print("pr_merge_signal_stripped=FALSE for all ingested rows")
 
 # COMMAND ----------
 
