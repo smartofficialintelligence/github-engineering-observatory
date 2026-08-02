@@ -80,21 +80,71 @@ def _hour_sort_key(hour: str) -> tuple:
     return tuple(int(p) for p in parts)
 
 
+
+
+# An hour must carry at least this many events of a type before its
+# fields are judged. Below it, a field's absence says nothing — rare
+# types like DiscussionEvent simply may not occur in a sampled hour.
+MIN_EVENTS_FOR_VERDICT = 30
+
+# A field counts as "carried" by an event type when it appears on at
+# least this share of that type's events. Optional fields (org, which
+# only exists for org-owned repos) hover well below; structural fields
+# sit near 100%.
+CARRIED_THRESHOLD_PCT = 50.0
+
+# A field must have been carried in at least this share of the judged
+# hours before it vanished (or after it arrived) to count as a schema
+# change rather than drift. Optional fields such as `org` — present only
+# for org-owned repos — cross the carried threshold by chance as that
+# population shifts, and without this filter they dominate the results.
+STABILITY = 0.80
+
+
 def field_presence_timeline(records: list[dict]) -> dict:
-    """(event_type, path) → {first_hour, last_hour, hours_present, gaps}."""
-    seen: dict[tuple[str, str], list[str]] = collections.defaultdict(list)
+    """(event_type, path) → per-hour presence, judged only where the
+    event type had enough volume for the answer to mean anything.
+
+    Records both hours where the field was carried and hours where the
+    type was well-sampled but the field was not, so a caller can tell
+    "removed" from "not sampled".
+    """
+    carried: dict[tuple[str, str], list[str]] = collections.defaultdict(list)
+    judged: dict[tuple[str, str], list[str]] = collections.defaultdict(list)
+
+    # Every path ever seen for a type, so absence can be evaluated.
+    paths_by_type: dict[str, set[str]] = collections.defaultdict(set)
     for r in records:
         for et, paths in r.get("fields", {}).items():
-            for path in paths:
-                seen[(et, path)].append(r["hour"])
+            paths_by_type[et].update(paths)
+
+    for r in records:
+        hour = r["hour"]
+        counts = r.get("event_types", {})
+        fields = r.get("fields", {})
+        for et, known_paths in paths_by_type.items():
+            if counts.get(et, 0) < MIN_EVENTS_FOR_VERDICT:
+                continue  # too thin to judge
+            seen_here = fields.get(et, {})
+            for path in known_paths:
+                judged[(et, path)].append(hour)
+                stats = seen_here.get(path)
+                if stats and stats.get("presence_pct", 0) >= CARRIED_THRESHOLD_PCT:
+                    carried[(et, path)].append(hour)
+
     out = {}
-    for key, hours in seen.items():
-        hours_sorted = sorted(hours, key=_hour_sort_key)
+    for key, judged_hours in judged.items():
+        c = sorted(carried.get(key, []), key=_hour_sort_key)
+        j = sorted(judged_hours, key=_hour_sort_key)
         out[key] = {
-            "first": hours_sorted[0],
-            "last": hours_sorted[-1],
-            "count": len(hours_sorted),
-            "hours": hours_sorted,
+            "first": c[0] if c else None,
+            "last": c[-1] if c else None,
+            "count": len(c),
+            "judged_first": j[0],
+            "judged_last": j[-1],
+            "judged_count": len(j),
+            "hours": c,
+            "judged_hours": j,
         }
     return out
 
@@ -186,44 +236,77 @@ def format_report(records: list[dict]) -> str:
     A("")
 
     # ---- disappeared fields -------------------------------------------------
-    last_hour = all_hours[-1]
-    first_hour = all_hours[0]
-    A("## Fields that disappeared")
+    A("## Fields that were removed")
     A("")
-    A("Present in an early sample, absent from the most recent sample. "
-      "Sorted by event type then path. Only shows fields seen in ≥3 hours "
-      "(filters sampling noise).")
+    A(f"A field counts as *carried* by an event type when it appears on "
+      f"≥{CARRIED_THRESHOLD_PCT:.0f}% of that type's events in an hour, and an "
+      f"hour is only judged when the type had ≥{MIN_EVENTS_FOR_VERDICT} events. "
+      f"Both filters matter: without the volume floor a rare type like "
+      f"DiscussionEvent looks removed whenever it misses a sample, and "
+      f"without the rate threshold optional fields like `org` (present only "
+      f"for org-owned repos) look intermittent.")
     A("")
-    A("| Event type | Field | First | Last seen | Hours seen |")
+    A("Removed = carried in ≥3 judged hours, then absent from every judged "
+      "hour since. `Last carried` is the final sample in which it appeared; "
+      "the true removal date lies between that and the next judged hour.")
+    A("")
+    A("| Event type | Field | First carried | Last carried | Hours carried |")
     A("| --- | --- | --- | --- | ---: |")
-    gone = [
-        (et, path, info) for (et, path), info in presence.items()
-        if info["last"] != last_hour and info["count"] >= 3
-    ]
-    for et, path, info in sorted(gone)[:120]:
+    gone = []
+    for (et, path), info in presence.items():
+        if info["count"] < 3 or not info["last"]:
+            continue
+        # Judged hours strictly after the last carried hour — if any exist
+        # and none carried it, the field is genuinely gone.
+        last_key = _hour_sort_key(info["last"])
+        after = [h for h in info["judged_hours"] if _hour_sort_key(h) > last_key]
+        if len(after) < 2:
+            continue
+        judged_before = [h for h in info["judged_hours"]
+                         if _hour_sort_key(h) <= last_key]
+        if not judged_before:
+            continue
+        if info["count"] / len(judged_before) < STABILITY:
+            continue  # intermittent, not removed
+        gone.append((et, path, info, len(after)))
+    for et, path, info, _ in sorted(gone)[:80]:
         A(f"| `{et}` | `{path}` | {info['first']} | {info['last']} "
           f"| {info['count']} |")
-    if len(gone) > 120:
-        A(f"| … | *{len(gone) - 120} more rows truncated* | | | |")
+    if not gone:
+        A("| *(none)* | | | | |")
+    if len(gone) > 80:
+        A(f"| … | *{len(gone) - 80} more truncated* | | | |")
     A("")
 
     # ---- new fields ---------------------------------------------------------
-    A("## Fields that appeared mid-decade")
+    A("## Fields that appeared")
     A("")
-    A("Absent from the earliest sample, present in the most recent. "
-      "Only shows fields seen in ≥3 hours.")
+    A("Absent from ≥2 judged hours at the start, then carried through to "
+      "the most recent judged hour. The true introduction date lies between "
+      "the last judged hour without it and `First carried`.")
     A("")
-    A("| Event type | Field | First seen | Hours seen |")
+    A("| Event type | Field | First carried | Hours carried |")
     A("| --- | --- | --- | ---: |")
-    new = [
-        (et, path, info) for (et, path), info in presence.items()
-        if info["first"] != first_hour and info["last"] == last_hour
-        and info["count"] >= 3
-    ]
-    for et, path, info in sorted(new)[:120]:
+    new = []
+    for (et, path), info in presence.items():
+        if info["count"] < 3 or not info["first"]:
+            continue
+        first_key = _hour_sort_key(info["first"])
+        before = [h for h in info["judged_hours"] if _hour_sort_key(h) < first_key]
+        judged_after = [h for h in info["judged_hours"]
+                        if _hour_sort_key(h) >= first_key]
+        still_current = info["last"] == info["judged_last"]
+        if len(before) < 2 or not still_current or not judged_after:
+            continue
+        if info["count"] / len(judged_after) < STABILITY:
+            continue  # intermittent, not introduced
+        new.append((et, path, info))
+    for et, path, info in sorted(new)[:80]:
         A(f"| `{et}` | `{path}` | {info['first']} | {info['count']} |")
-    if len(new) > 120:
-        A(f"| … | *{len(new) - 120} more rows truncated* | | |")
+    if not new:
+        A("| *(none)* | | | |")
+    if len(new) > 80:
+        A(f"| … | *{len(new) - 80} more truncated* | | |")
     A("")
 
     # ---- enum drift ---------------------------------------------------------

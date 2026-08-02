@@ -86,6 +86,31 @@ fire only for batches spanning 2025-10-09 → 2025-12-01. Consumers can
 now use the exact 54-day window directly rather than treating
 "post-June-2025" as suspect.
 
+*Decade schema map (2026-08-02, from `pipelines/schema_drift/`):* the
+2025-10-09 boundary is far larger than a PR-merge event. Monthly schema
+sampling across 139 hours (2015-01 → 2026-07) shows **831 fields removed
+in that single event** — 292 from `PullRequestReviewEvent`, 269 from
+`PullRequestEvent`, 258 from `PullRequestReviewCommentEvent`, 11 from
+`PushEvent` — and that accounts for *every* field removal in the decade.
+The preceding ten years only added fields (182 in total). `payload.commits`
+went with it and, unlike the merge signal, never returned: commit-level
+metrics are available 2015-01-01 → 2025-10-08 and permanently unavailable
+after. Full evidence in `docs/schema_drift_timeline.md`; the comparability
+rules that follow from it in `docs/normalization_basis.md`.
+
+*Collection outages are a third, separate distortion (2026-08-02):* the
+archive itself failed seven times for 42 days total, independently of any
+filtering. Longest is **2021-10-06 → 10-29** (24 days, worst day 1.7% of
+normal, three day-tables absent), which means any 2021 annual aggregate is
+materially short — 2021 carries four separate incidents. The 2025-10-09 →
+10-14 outage coincides exactly with the payload collapse, suggesting one
+upstream incident caused both. Full list in `docs/normalization_basis.md`;
+regenerate with `pipelines/schema_drift/find_outages.py` (free). This also
+retracts a method used earlier in this document's investigation: hourly
+probing cannot establish a boundary that falls inside an outage, because a
+near-empty file reads as "field removed". Only full-day aggregates have the
+denominator to support such a verdict.
+
 ## OQ-2 — Does PullRequestEvent `action='closed'` now mean closed-without-merge?
 
 2026 introduces `action='merged'` (172 in sample) alongside `closed` (12);
