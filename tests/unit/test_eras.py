@@ -170,8 +170,9 @@ def test_eras_spanned_is_inclusive_at_edges():
 
 
 def test_within_era_comparison_is_clean():
+    """2023 sits wholly inside census and carries no registered outage."""
     assert eras.check_comparison(
-        "push_events", dt.date(2019, 1, 1), dt.date(2020, 1, 1)
+        "push_events", dt.date(2023, 1, 1), dt.date(2023, 12, 1)
     ) == []
 
 
@@ -185,8 +186,17 @@ def test_pr_merged_flags_the_merge_blind_window():
 
 def test_pr_merged_is_clean_when_the_range_avoids_merge_blind():
     assert eras.check_comparison(
-        "pr_merged", dt.date(2019, 1, 1), dt.date(2020, 1, 1)
+        "pr_merged", dt.date(2023, 1, 1), dt.date(2023, 12, 1)
     ) == []
+
+
+def test_a_clean_looking_2019_range_still_warns_about_its_outage():
+    """2019 looks like a quiet census year but contains a one-day
+    collection failure — the checker must not let that pass silently."""
+    warnings = eras.check_comparison(
+        "push_events", dt.date(2019, 1, 1), dt.date(2020, 1, 1)
+    )
+    assert any("outage" in w for w in warnings)
 
 
 def test_shape_only_metric_warns_across_the_filter_step():
@@ -227,3 +237,38 @@ def test_state_reason_metrics_are_era_bound():
     """These depend on a field GitHub only introduced in late 2022."""
     for metric in ("issues_closed_completed", "issues_closed_not_planned"):
         assert eras.rule_for(metric).comparability is eras.Comparability.ERA_BOUND
+
+
+def test_all_seven_decade_outages_are_registered():
+    """find_outages.py over the full decade found 7 collection outages
+    totalling 37 days; all must be known to check_comparison."""
+    assert len(eras.OUTAGES) == 7
+    # Outage.days is the calendar span of each window. find_outages.py
+    # reports 37 *flagged* days; the windows total 42 because a few
+    # healthy days sit inside the long October 2021 window.
+    assert sum(o.days for o in eras.OUTAGES) == 42
+
+
+def test_october_2021_is_the_longest_outage():
+    """20 flagged days over a 24-day span — invisible to any baseline
+    drawn from its own neighbourhood, which is why it went unnoticed."""
+    longest = max(eras.OUTAGES, key=lambda o: o.days)
+    assert longest.start == dt.date(2021, 10, 6)
+    assert longest.end == dt.date(2021, 10, 29)
+    assert longest.days == 24
+
+
+def test_outages_are_ordered_and_disjoint():
+    for a, b in zip(eras.OUTAGES, eras.OUTAGES[1:]):
+        assert a.end < b.start, f"{a.start} and {b.start} overlap or misorder"
+
+
+def test_2021_annual_aggregates_are_flagged():
+    """2021 carries four separate outages — an annual total is short."""
+    hits = eras.outages_overlapping(dt.date(2021, 1, 1), dt.date(2021, 12, 31))
+    assert len(hits) == 4
+
+
+def test_missing_year_end_tables_are_recorded():
+    assert dt.date(2013, 12, 31) in eras.MISSING_YEAR_END_TABLES
+    assert len(eras.MISSING_YEAR_END_TABLES) == 5

@@ -19,3 +19,9 @@ _download_audit.jsonl
 .DS_Store
 .idea/
 .vscode/
+
+# Raw per-hour schema profiles from pipelines/schema_drift/scan_decade.py.
+# ~2.4 MB per sampled hour (every field path with its distinct values), so
+# a decade sample runs to hundreds of MB. Regenerate with scan_decade.py;
+# commit the derived timeline and outage map instead.
+artifacts/schema_drift/hourly_profiles.jsonl

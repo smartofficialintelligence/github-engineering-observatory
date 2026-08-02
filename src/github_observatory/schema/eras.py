@@ -126,21 +126,91 @@ class Outage:
         return (self.end - self.start).days + 1
 
 
+# Found by pipelines/schema_drift/find_outages.py over the full decade of
+# githubarchive.day.__TABLES__ row counts (a free metadata query), each day
+# compared against the median of the same weekday 4-9 weeks away. The
+# same-weekday baseline matters: GitHub activity drops ~40% at weekends, so
+# a naive comparison flags every Saturday. The 4-9 week offset matters too —
+# the October 2021 outage ran 20 days and is invisible to any baseline drawn
+# from its own neighbourhood.
+#
+# 37 days across the decade. Regenerate with:
+#   python pipelines/schema_drift/find_outages.py --project <p> \
+#       --output artifacts/schema_drift/outages.json
 OUTAGES: tuple[Outage, ...] = (
+    Outage(
+        start=dt.date(2019, 9, 12),
+        end=dt.date(2019, 9, 12),
+        typical_rows_per_day=1_971_698,
+        observed_rows_per_day="557,535 (28.3% of baseline)",
+        evidence="find_outages.py; single-day collection failure",
+    ),
+    Outage(
+        start=dt.date(2020, 8, 21),
+        end=dt.date(2020, 8, 23),
+        typical_rows_per_day=2_679_986,
+        observed_rows_per_day="522k–790k (19.5%–29% of baseline); "
+                              "2020-08-22 table missing entirely",
+        evidence="find_outages.py; 3 days, 1 missing table",
+    ),
+    Outage(
+        start=dt.date(2021, 3, 9),
+        end=dt.date(2021, 3, 10),
+        typical_rows_per_day=3_171_538,
+        observed_rows_per_day="985k–1.01M (31%–33% of baseline)",
+        evidence="find_outages.py; 2 days degraded",
+    ),
+    Outage(
+        start=dt.date(2021, 5, 8),
+        end=dt.date(2021, 5, 11),
+        typical_rows_per_day=2_106_033,
+        observed_rows_per_day="0 — tables for 05-08, 05-10, 05-11 absent",
+        evidence="find_outages.py; 3 of 4 day tables missing outright",
+    ),
+    Outage(
+        start=dt.date(2021, 8, 26),
+        end=dt.date(2021, 8, 27),
+        typical_rows_per_day=2_927_332,
+        observed_rows_per_day="80,254 (2.7%); 2021-08-26 table missing",
+        evidence="find_outages.py; near-total loss over 2 days",
+    ),
+    Outage(
+        start=dt.date(2021, 10, 6),
+        end=dt.date(2021, 10, 29),
+        typical_rows_per_day=3_363_568,
+        observed_rows_per_day="57,932–1.4M (1.7%–41%); tables for 10-26, "
+                              "10-27, 10-28 absent",
+        evidence=(
+            "find_outages.py — the longest outage in the archive's history. "
+            "Two phases: 10-06 crashes to 357k, then 10-07..10-21 runs at a "
+            "sustained ~1.0-1.4M (roughly a third of normal), then 10-22..29 "
+            "collapses to 58k-542k with three days missing entirely. "
+            "Recovery on 10-30. Any 2021 annual aggregate is materially "
+            "short and any October 2021 rate is meaningless."
+        ),
+    ),
     Outage(
         start=dt.date(2025, 10, 9),
         end=dt.date(2025, 10, 14),
-        typical_rows_per_day=3_500_000,
-        observed_rows_per_day="14.6k–425k (0.4%–12% of normal)",
+        typical_rows_per_day=3_677_646,
+        observed_rows_per_day="14.6k–425k (0.4%–12% of baseline)",
         evidence=(
-            "githubarchive.day.* row counts: Oct 7 3,875,261; Oct 8 "
-            "2,769,429 (partial, last event 23:50:40); Oct 9 18,906; "
+            "find_outages.py, corroborated day by day: Oct 7 3,875,261; "
+            "Oct 8 2,769,429 (partial, last event 23:50:40); Oct 9 18,906; "
             "Oct 10 18,864; Oct 11 14,606; Oct 12 15,534; Oct 13 18,241; "
             "Oct 14 424,570 (recovering); Oct 15 3,465,925 (recovered). "
             "Coincides exactly with the payload-stripping boundary, which "
             "suggests one upstream incident caused both."
         ),
     ),
+)
+
+
+# The 2011-2015 archive is missing every 31 December day table. This is a
+# source artifact rather than a collection failure, but a backfill will
+# still find a hole there.
+MISSING_YEAR_END_TABLES: tuple[dt.date, ...] = tuple(
+    dt.date(y, 12, 31) for y in range(2011, 2016)
 )
 
 
