@@ -60,6 +60,32 @@ The exact restoration date matters for narrowing the NULL era; a small
 BQ probe on `githubarchive.day.202603XX` / `.202604XX` (<$0.02 each)
 can pin it down.
 
+*Boundary dates pinned (2026-08-02, via
+`pipelines/gcp_lifecycle_backfill/pin_signal_boundaries.py` binary
+search over `githubarchive.day.*`, total spend $0.86, log at
+`artifacts/signal_probes.jsonl`):*
+
+* **Onset**: signal was present on **2025-10-08** (81,376 merges
+  detectable via `pull_request.merged=true`) and absent on
+  **2025-10-09** (0 detectable). Sharp overnight switch.
+* **Restoration**: signal was absent on **2025-12-01** (0 detectable via
+  either signal) and present on **2025-12-02** (11,871 merges via the
+  new synthetic `action='merged'`). Sharp overnight switch.
+
+**Actual stripped window: 2025-10-09 through 2025-12-01 = 54 days**,
+not the "since June 2025" our earlier bench had implied. The volume
+step in October 2025 (documented earlier in this OQ entry) is likely
+the same upstream event as this signal-stripping — filter composition
+was upgraded on Oct 9, then reverted on Dec 2 with a new synthetic
+merge action tag replacing the historical `pull_request.merged=true`.
+Post-restoration, `action='merged'` is the sole merge signal
+(`pull_request.merged` field remains stripped from the slimmed payload).
+
+The pass-2 pipeline's `pr_merge_signal_stripped` flag will therefore
+fire only for batches spanning 2025-10-09 → 2025-12-01. Consumers can
+now use the exact 54-day window directly rather than treating
+"post-June-2025" as suspect.
+
 ## OQ-2 — Does PullRequestEvent `action='closed'` now mean closed-without-merge?
 
 2026 introduces `action='merged'` (172 in sample) alongside `closed` (12);
