@@ -104,8 +104,18 @@ FEATURES: dict[str, tuple[str, Optional[str], Optional[str]]] = {
 
 
 def probe_hour(day: dt.date, hour: int, pred: Callable[[dict], bool],
-               raw_dir: str, min_hits: int, keep: bool) -> Optional[int]:
-    """Download one hour, count events satisfying pred. None if unavailable."""
+               raw_dir: str, min_hits: int, keep: bool,
+               event_type: Optional[str], min_denominator: int) -> Optional[bool]:
+    """Download one hour and decide whether the feature is present.
+
+    Returns True (present), False (absent), or None (cannot tell).
+
+    None is returned when the hour does not carry enough events of the
+    relevant type to support a conclusion. This guard matters: GH Archive
+    has real collection outages — 2025-10-09 to 2025-10-14 ran at ~0.5% of
+    normal volume — and without it a near-empty hour reads as "field
+    removed", inventing a schema boundary where there is only missing data.
+    """
     spec = f"{day:%Y-%m-%d}-{hour}"
     result = download_hour(spec, raw_dir)
     if result.status == "failed":
@@ -114,6 +124,7 @@ def probe_hour(day: dt.date, hour: int, pred: Callable[[dict], bool],
     path = os.path.join(raw_dir, result.source_file)
     hits = 0
     scanned = 0
+    denominator = 0  # events of the type the predicate applies to
     try:
         with gzip.open(path, "rb") as fh:
             for line in fh:
@@ -125,29 +136,45 @@ def probe_hour(day: dt.date, hour: int, pred: Callable[[dict], bool],
                 except (ValueError, UnicodeDecodeError):
                     continue
                 scanned += 1
+                if event_type is None or event.get("type") == event_type:
+                    denominator += 1
                 if pred(event):
                     hits += 1
-                    if hits >= min_hits:
-                        break  # early exit once threshold is met
+                    # Cannot early-exit: the denominator must be complete so
+                    # a PRESENT verdict is auditable and the thin-file guard
+                    # applies symmetrically to both verdicts.
     finally:
         if not keep and os.path.exists(path):
             os.unlink(path)
+
+    scope = f"{event_type} " if event_type else ""
     if hits >= min_hits:
-        # Early exit means `scanned` is a partial count — don't report it
-        # as if the whole hour were read.
-        print(f"  [{spec}] hits={hits}+ (stopped early) → PRESENT", flush=True)
-    else:
-        print(f"  [{spec}] hits={hits} of {scanned:,} events → ABSENT", flush=True)
-    return hits
+        print(f"  [{spec}] hits={hits:,} of {denominator:,} {scope}events "
+              f"→ PRESENT", flush=True)
+        return True
+    if denominator < min_denominator:
+        print(f"  [{spec}] only {denominator:,} {scope}events "
+              f"(< {min_denominator:,} needed) → INCONCLUSIVE, skipping",
+              flush=True)
+        return None
+    print(f"  [{spec}] hits={hits} of {denominator:,} {scope}events "
+          f"→ ABSENT", flush=True)
+    return False
 
 
 def binary_search(lo: dt.date, hi: dt.date, hour: int,
                   pred: Callable[[dict], bool], raw_dir: str,
-                  min_hits: int, keep: bool) -> Optional[tuple]:
-    """Find the day the predicate's presence flips between lo and hi."""
+                  min_hits: int, keep: bool, event_type: Optional[str],
+                  min_denominator: int) -> Optional[tuple]:
+    """Find the day the predicate's presence flips between lo and hi.
+
+    Days that cannot support a verdict (archive outages) are skipped by
+    nudging to a neighbour, so an outage widens the final bracket rather
+    than producing a spurious boundary inside it.
+    """
     def present(day: dt.date) -> Optional[bool]:
-        hits = probe_hour(day, hour, pred, raw_dir, min_hits, keep)
-        return None if hits is None else hits >= min_hits
+        return probe_hour(day, hour, pred, raw_dir, min_hits, keep,
+                          event_type, min_denominator)
 
     lo_state = present(lo)
     hi_state = present(hi)
@@ -165,8 +192,9 @@ def binary_search(lo: dt.date, hi: dt.date, hour: int,
         state = present(mid)
         probes += 1
         if state is None:
-            # Missing hour: nudge to a neighbouring day.
-            for delta in (1, -1, 2, -2, 3, -3):
+            # Unusable day (outage or missing file): try neighbours before
+            # giving up, widening outward so we escape a multi-day gap.
+            for delta in (1, -1, 2, -2, 3, -3, 4, -4, 5, -5, 6, -6, 7, -7):
                 cand = mid + dt.timedelta(days=delta)
                 if lo < cand < hi:
                     state = present(cand)
@@ -175,13 +203,15 @@ def binary_search(lo: dt.date, hi: dt.date, hour: int,
                         mid = cand
                         break
             if state is None:
-                print(f"cannot probe near {mid} — aborting", flush=True)
-                return None
+                print(f"no usable day near {mid} within [{lo}, {hi}] — "
+                      f"boundary lies inside an archive outage and cannot be "
+                      f"narrowed further from hourly files", flush=True)
+                return lo, hi, lo_state, hi_state, probes, True
         if state == lo_state:
             lo = mid
         else:
             hi = mid
-    return lo, hi, lo_state, hi_state, probes
+    return lo, hi, lo_state, hi_state, probes, False
 
 
 def main(argv=None) -> int:
@@ -196,6 +226,11 @@ def main(argv=None) -> int:
     p.add_argument("--hour", type=int, default=12, help="hour of day UTC (default 12)")
     p.add_argument("--min-hits", type=int, default=1,
                    help="events needed to call the feature present (default 1)")
+    p.add_argument("--min-denominator", type=int, default=200,
+                   help="minimum events of the relevant type before an ABSENT "
+                   "verdict is trusted (default 200). Guards against GH "
+                   "Archive collection outages — e.g. 2025-10-09..14 ran at "
+                   "~0.5%% of normal volume — being misread as field removal.")
     p.add_argument("--dest", default=None, help="download dir (default: temp)")
     p.add_argument("--keep-downloads", action="store_true")
     p.add_argument("--list-features", action="store_true")
@@ -225,16 +260,25 @@ def main(argv=None) -> int:
     os.makedirs(raw_dir, exist_ok=True)
 
     print(f"searching for `{label}` transition in [{lo}, {hi}] "
-          f"at {args.hour:02d}:00 UTC, min_hits={args.min_hits}")
+          f"at {args.hour:02d}:00 UTC, min_hits={args.min_hits}, "
+          f"min_denominator={args.min_denominator}")
     result = binary_search(lo, hi, args.hour, pred, raw_dir,
-                           args.min_hits, args.keep_downloads)
+                           args.min_hits, args.keep_downloads,
+                           event_type, args.min_denominator)
     if result is None:
         return 1
-    lo_d, hi_d, lo_state, hi_state, probes = result
+    lo_d, hi_d, lo_state, hi_state, probes, blocked = result
+    gap = (hi_d - lo_d).days
     print(f"\n=== `{label}` ===")
     print(f"{lo_d}: {'PRESENT' if lo_state else 'ABSENT'}")
     print(f"{hi_d}: {'PRESENT' if hi_state else 'ABSENT'}")
-    print(f"transition pinned to a 1-day gap in {probes} probes ($0.00)")
+    if blocked:
+        print(f"bracket is {gap} days wide — an archive outage inside it "
+              f"blocked further narrowing. Confirm with full-day counts "
+              f"from githubarchive.day.* before treating either endpoint "
+              f"as the boundary.")
+    else:
+        print(f"transition pinned to a {gap}-day gap in {probes} probes ($0.00)")
     return 0
 
 

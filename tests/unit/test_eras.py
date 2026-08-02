@@ -71,11 +71,78 @@ def test_pinned_boundaries_align_with_era_edges():
 
 
 def test_every_boundary_records_its_evidence():
+    """A pinned date is a strong claim; it must name the method that
+    established it so a reader can re-derive or challenge it."""
+    methods = ("binary search", "full-day counts", "day-table counts")
     for boundary in eras.BOUNDARIES:
         assert boundary.evidence.strip(), f"{boundary} has no evidence"
         if boundary.confidence is eras.Confidence.PINNED:
-            # A pinned claim must name how it was established.
-            assert "binary search" in boundary.evidence.lower()
+            assert any(m in boundary.evidence.lower() for m in methods), (
+                f"{boundary} is PINNED but names no method"
+            )
+
+
+# -- collection outages --------------------------------------------------------
+
+
+def test_october_2025_outage_is_registered():
+    """Ranges covering this window produce spurious troughs unless the
+    outage is known — 3.5M rows/day drops to ~15k."""
+    outage = eras.outage_for(dt.date(2025, 10, 11))
+    assert outage is not None
+    assert outage.start == dt.date(2025, 10, 9)
+    assert outage.end == dt.date(2025, 10, 14)
+    assert outage.days == 6
+
+
+def test_outage_boundaries_are_exclusive_of_healthy_days():
+    assert eras.outage_for(dt.date(2025, 10, 8)) is None   # 2.77M rows
+    assert eras.outage_for(dt.date(2025, 10, 15)) is None  # 3.47M rows
+
+
+def test_outages_overlapping_detects_partial_overlap():
+    assert eras.outages_overlapping(
+        dt.date(2025, 10, 1), dt.date(2025, 10, 10)
+    )
+    assert not eras.outages_overlapping(
+        dt.date(2025, 1, 1), dt.date(2025, 6, 1)
+    )
+
+
+def test_comparison_warns_about_outage_even_within_one_era():
+    """The outage sits inside merge_blind, so era-count alone would not
+    trigger a warning — the outage check must fire independently."""
+    warnings = eras.check_comparison(
+        "total_events", dt.date(2025, 10, 9), dt.date(2025, 11, 1)
+    )
+    assert any("outage" in w for w in warnings)
+
+
+# -- commit availability -------------------------------------------------------
+
+
+def test_commit_metrics_end_at_the_stripping_boundary():
+    """payload.commits was present for 10 of 11 years then removed for
+    good — the widest valid range must stop before merge_blind."""
+    rule = eras.rule_for("commits")
+    assert "merge_blind" in rule.invalid_eras
+    assert "merge_restored" in rule.invalid_eras
+    start, end = eras.valid_range_for("commits")
+    assert start == dt.date(2015, 1, 1)
+    assert end == dt.date(2025, 10, 8)
+
+
+def test_valid_range_for_unrestricted_metric_is_open_ended():
+    assert eras.valid_range_for("push_events") == (dt.date(2015, 1, 1), None)
+
+
+def test_metric_classification_helpers_partition_the_rules():
+    total = (
+        len(eras.decade_comparable_metrics())
+        + len(eras.shape_only_metrics())
+        + len(eras.era_bound_metrics())
+    )
+    assert total == len(eras.METRIC_RULES)
 
 
 # -- eras_spanned --------------------------------------------------------------
@@ -89,7 +156,7 @@ def test_eras_spanned_within_one_era():
 def test_eras_spanned_across_the_decade():
     spanned = eras.eras_spanned(dt.date(2015, 1, 1), dt.date(2026, 1, 1))
     assert [e.name for e in spanned] == [
-        "census", "filtered", "merge_blind", "restored",
+        "census", "filtered", "merge_blind", "merge_restored",
     ]
 
 

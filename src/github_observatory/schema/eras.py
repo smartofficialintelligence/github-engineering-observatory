@@ -75,12 +75,18 @@ BOUNDARIES: tuple[Boundary, ...] = (
     ),
     Boundary(
         dt.date(2025, 10, 9),
-        "PR merge signal stripped: payload.pull_request.merged disappears",
+        "comprehensive payload stripping: PushEvent loses payload.commits "
+        "AND PullRequestEvent loses payload.pull_request.merged, same day",
         Confidence.PINNED,
-        "binary search, two independent methods agreeing: BigQuery day-table "
-        "counts (pin_signal_boundaries.py) and local hourly-file scan "
-        "(pin_boundary.py). 2025-10-08 PRESENT, 2025-10-09 ABSENT. "
-        "artifacts/signal_probes.jsonl",
+        "full-day counts from githubarchive.day.*: 2025-10-08 had "
+        "1,714,628/1,718,234 pushes carrying commits (99.8%) and "
+        "215,537/215,846 PR events carrying the merged field (99.9%); "
+        "2025-10-09 had 0/12,228 and 0/1,456 respectively. Healthy days "
+        "either side confirm — 2025-10-15 (3.47M rows) and 2025-10-20 "
+        "(3.50M rows) both show 0 of millions. NOTE: hourly-file probing "
+        "cannot establish this date, because 2025-10-09..14 is an archive "
+        "outage (see OUTAGES); only full-day aggregates have the "
+        "denominator to support the verdict.",
     ),
     Boundary(
         dt.date(2025, 12, 2),
@@ -91,6 +97,63 @@ BOUNDARIES: tuple[Boundary, ...] = (
         "new synthetic action). artifacts/signal_probes.jsonl",
     ),
 )
+
+
+# --- collection outages -------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Outage:
+    """A window in which GH Archive collected far less than normal.
+
+    Distinct from filtering: during an outage the *collector* failed, so
+    the missing events are missing for everyone. Any metric over these
+    days is a floor, not a measurement, and any rate computed across them
+    is wrong. Backfills leave a visible hole here.
+    """
+
+    start: dt.date
+    end: dt.date
+    typical_rows_per_day: int
+    observed_rows_per_day: str
+    evidence: str
+
+    def contains(self, when: dt.date) -> bool:
+        return self.start <= when <= self.end
+
+    @property
+    def days(self) -> int:
+        return (self.end - self.start).days + 1
+
+
+OUTAGES: tuple[Outage, ...] = (
+    Outage(
+        start=dt.date(2025, 10, 9),
+        end=dt.date(2025, 10, 14),
+        typical_rows_per_day=3_500_000,
+        observed_rows_per_day="14.6k–425k (0.4%–12% of normal)",
+        evidence=(
+            "githubarchive.day.* row counts: Oct 7 3,875,261; Oct 8 "
+            "2,769,429 (partial, last event 23:50:40); Oct 9 18,906; "
+            "Oct 10 18,864; Oct 11 14,606; Oct 12 15,534; Oct 13 18,241; "
+            "Oct 14 424,570 (recovering); Oct 15 3,465,925 (recovered). "
+            "Coincides exactly with the payload-stripping boundary, which "
+            "suggests one upstream incident caused both."
+        ),
+    ),
+)
+
+
+def outage_for(when: dt.date | dt.datetime) -> Outage | None:
+    day = when.date() if isinstance(when, dt.datetime) else when
+    for outage in OUTAGES:
+        if outage.contains(day):
+            return outage
+    return None
+
+
+def outages_overlapping(start: dt.date, end: dt.date) -> tuple[Outage, ...]:
+    return tuple(o for o in OUTAGES if o.start <= end and o.end >= start)
 
 
 # --- eras ---------------------------------------------------------------------
@@ -150,28 +213,35 @@ ERAS: tuple[Era, ...] = (
         start=dt.date(2025, 10, 9),
         end=dt.date(2025, 12, 1),
         summary=(
-            "54-day window in which the feed carries no PR merge signal in "
-            "any encoding. pr_merged is structurally unrecoverable here."
+            "Payloads stripped and no PR merge signal in any encoding. "
+            "54 days in which pr_merged is structurally unrecoverable."
         ),
         caveats=(
-            "pr_merged reads 0 — this is signal loss, not an absence of "
-            "merges. pr_closed_no_merge is correspondingly inflated, since "
-            "former merges fall into it.",
-            "Both boundaries of this era are PINNED to the day.",
+            "pr_merged reads 0 — signal loss, not an absence of merges. "
+            "pr_closed_no_merge is correspondingly inflated, since former "
+            "merges fall into it.",
+            "PushEvent lost payload.commits at this era's start and never "
+            "regained it — commit-level metrics end here permanently.",
+            "The first six days overlap an archive collection outage "
+            "(see OUTAGES): 2025-10-09..14 carry ~0.5% of normal volume, "
+            "so counts there are floors, not measurements.",
         ),
     ),
     Era(
-        name="restored",
+        name="merge_restored",
         start=dt.date(2025, 12, 2),
         end=None,
         summary=(
-            "Merge signal returns in a new encoding: a synthetic "
+            "Merge signal returns in a new encoding — a synthetic "
             "action='merged' rather than the historical "
-            "pull_request.merged=true. Payloads remain slim."
+            "pull_request.merged=true. Only the merge signal came back: "
+            "payloads stay slim and commits stay gone."
         ),
         caveats=(
-            "pull_request.merged remains absent — only the action encoding "
-            "works here, so merge detection must handle both forms.",
+            "pull_request.merged remains absent, so merge detection must "
+            "handle both encodings depending on era.",
+            "payload.commits is still absent — the loss at 2025-10-09 was "
+            "not reversed. Commit counts remain unobservable.",
             "Filtering from the earlier eras persists; non-push absolute "
             "levels are still not census.",
         ),
@@ -286,7 +356,56 @@ METRIC_RULES: dict[str, MetricRule] = {
         Comparability.ERA_BOUND,
         "Same dependency on state_reason as issues_closed_completed.",
     ),
+
+    # -- commit-derived: available for 10 of 11 years, then gone for good --
+    "commits": MetricRule(
+        Comparability.ERA_BOUND,
+        "payload.commits was present on ~99.8% of pushes through "
+        "2025-10-08 and absent from 2025-10-09 onward, never restored. "
+        "Commit-level metrics are therefore computable for the census and "
+        "filtered eras but end permanently at 2025-10-08.",
+        invalid_eras=("merge_blind", "merge_restored"),
+    ),
+    "commits_per_push": MetricRule(
+        Comparability.ERA_BOUND,
+        "Same dependency on payload.commits; ends at 2025-10-08.",
+        invalid_eras=("merge_blind", "merge_restored"),
+    ),
 }
+
+
+# Metrics whose underlying field is available in every era — the honest
+# intersection. Anything outside this set needs either an era restriction
+# or a shape-only reading.
+def decade_comparable_metrics() -> tuple[str, ...]:
+    return tuple(sorted(
+        m for m, r in METRIC_RULES.items()
+        if r.comparability is Comparability.DECADE
+    ))
+
+
+def shape_only_metrics() -> tuple[str, ...]:
+    return tuple(sorted(
+        m for m, r in METRIC_RULES.items()
+        if r.comparability is Comparability.SHAPE_ONLY
+    ))
+
+
+def era_bound_metrics() -> tuple[str, ...]:
+    return tuple(sorted(
+        m for m, r in METRIC_RULES.items()
+        if r.comparability is Comparability.ERA_BOUND
+    ))
+
+
+def valid_range_for(metric: str) -> tuple[dt.date, dt.date | None] | None:
+    """Widest date range over which ``metric`` is meaningful, or None if
+    it is valid in no era. Useful for clamping a query window."""
+    rule = rule_for(metric)
+    usable = [e for e in ERAS if e.name not in rule.invalid_eras]
+    if not usable:
+        return None
+    return usable[0].start, usable[-1].end
 
 
 def rule_for(metric: str) -> MetricRule:
@@ -308,13 +427,26 @@ def check_comparison(metric: str, start: dt.date, end: dt.date) -> list[str]:
     surfaced to whoever is reading the number — these are the ways the
     measuring instrument changed underneath the series.
     """
+    warnings: list[str] = []
+
+    # Outages apply regardless of era count: a single-era range that
+    # contains one still yields wrong totals and rates.
+    for outage in outages_overlapping(start, end):
+        warnings.append(
+            f"range covers a {outage.days}-day GH Archive collection "
+            f"outage ({outage.start} to {outage.end}, "
+            f"{outage.observed_rows_per_day} vs ~"
+            f"{outage.typical_rows_per_day:,}/day typical). Counts there "
+            f"are floors, not measurements; exclude those days or expect "
+            f"a spurious trough."
+        )
+
     spanned = eras_spanned(start, end)
     if len(spanned) <= 1:
-        return []
+        return warnings
 
     rule = rule_for(metric)
     names = [e.name for e in spanned]
-    warnings: list[str] = []
 
     invalid = [n for n in names if n in rule.invalid_eras]
     if invalid:
