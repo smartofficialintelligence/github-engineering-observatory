@@ -188,14 +188,24 @@ def flatten_event(
     return out
 
 
+_DISTINCT_VALUES_CAP = 64  # per-field cap on distinct-value set size
+
+
 class _FieldStats:
-    __slots__ = ("presence_count", "null_events", "type_counter", "sample_value")
+    __slots__ = (
+        "presence_count", "null_events", "type_counter",
+        "sample_value", "distinct_values",
+    )
 
     def __init__(self) -> None:
         self.presence_count = 0
         self.null_events = 0
         self.type_counter: collections.Counter[str] = collections.Counter()
         self.sample_value: str | None = None
+        # Bounded set for enum-drift detection. Only captures scalars
+        # (strings/bools/small ints) — big samples fall through to
+        # sample_value only.
+        self.distinct_values: set = set()
 
     def update(self, obs: _PathObs) -> None:
         self.presence_count += 1
@@ -208,6 +218,18 @@ class _FieldStats:
             except (TypeError, ValueError):
                 rendered = repr(obs.sample)
             self.sample_value = _truncate(rendered)
+        # Enum tracking: record scalar values up to a cap, so downstream
+        # can diff distinct-value sets across dates (e.g. spot when
+        # action='merged' or state_reason='not_planned' first appears).
+        # Skip long strings — they're not enum-like.
+        v = obs.sample
+        if (
+            v is not None
+            and isinstance(v, (str, bool, int))
+            and not (isinstance(v, str) and len(v) > 80)
+            and len(self.distinct_values) < _DISTINCT_VALUES_CAP
+        ):
+            self.distinct_values.add(v)
 
     def spark_type(self) -> str:
         names = sorted(self.type_counter.keys() - {"NULL"})
