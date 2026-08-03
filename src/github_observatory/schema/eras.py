@@ -538,3 +538,86 @@ def check_comparison(metric: str, start: dt.date, end: dt.date) -> list[str]:
         )
 
     return warnings
+
+
+# --- SQL projection -----------------------------------------------------------
+#
+# Gold and the dashboards need era/outage classification per row. Generating
+# the SQL here keeps this module the single source of truth: adding an outage
+# or moving a boundary updates the pipeline without anyone re-typing dates.
+
+
+def era_case_sql(ts_column: str = "event_hour") -> str:
+    """CASE expression labelling each row with its era name."""
+    whens = []
+    for era in ERAS:
+        if era.end is None:
+            whens.append(
+                f"WHEN CAST({ts_column} AS DATE) >= DATE'{era.start}' "
+                f"THEN '{era.name}'"
+            )
+        else:
+            whens.append(
+                f"WHEN CAST({ts_column} AS DATE) BETWEEN DATE'{era.start}' "
+                f"AND DATE'{era.end}' THEN '{era.name}'"
+            )
+    return "CASE " + " ".join(whens) + " ELSE 'pre_coverage' END"
+
+
+def in_outage_sql(ts_column: str = "event_hour") -> str:
+    """Boolean expression: does this row fall inside a collection outage?
+
+    Rows inside an outage are floors rather than measurements, so any
+    honest aggregate has to be able to exclude them.
+    """
+    if not OUTAGES:
+        return "FALSE"
+    clauses = [
+        f"(CAST({ts_column} AS DATE) BETWEEN DATE'{o.start}' AND DATE'{o.end}')"
+        for o in OUTAGES
+    ]
+    return "(" + " OR ".join(clauses) + ")"
+
+
+def era_ordinal_sql(ts_column: str = "event_hour") -> str:
+    """Position of the row's era in ERAS, so a dashboard can express
+    "at least as constrained as X" as a numeric comparison."""
+    whens = []
+    for i, era in enumerate(ERAS):
+        if era.end is None:
+            whens.append(
+                f"WHEN CAST({ts_column} AS DATE) >= DATE'{era.start}' THEN {i}"
+            )
+        else:
+            whens.append(
+                f"WHEN CAST({ts_column} AS DATE) BETWEEN DATE'{era.start}' "
+                f"AND DATE'{era.end}' THEN {i}"
+            )
+    return "CASE " + " ".join(whens) + " ELSE -1 END"
+
+
+def null_outside_valid_eras_sql(metric: str, ts_column: str = "event_hour") -> str:
+    """Wrap ``metric`` so it reads NULL where it is structurally absent.
+
+    A structural zero is the dangerous case: it is indistinguishable from
+    a real zero, so `pr_merged` during merge_blind reads as "no merges
+    happened" when it means "the signal was removed". NULL makes charts
+    show a gap, which is the truth.
+    """
+    rule = rule_for(metric)
+    if not rule.invalid_eras:
+        return metric
+    bad = [e for e in ERAS if e.name in rule.invalid_eras]
+    clauses = []
+    for era in bad:
+        if era.end is None:
+            clauses.append(f"CAST({ts_column} AS DATE) >= DATE'{era.start}'")
+        else:
+            clauses.append(
+                f"CAST({ts_column} AS DATE) BETWEEN DATE'{era.start}' "
+                f"AND DATE'{era.end}'"
+            )
+    return (
+        f"CASE WHEN {' OR '.join(clauses)} THEN CAST(NULL AS BIGINT) "
+        f"ELSE {metric} END"
+    )

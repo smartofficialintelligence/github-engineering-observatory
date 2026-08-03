@@ -25,6 +25,7 @@ import logging
 import uuid
 from typing import Any
 
+from github_observatory.schema import eras
 from github_observatory.common.config import (
     BQ_LIFECYCLE_HOURLY_TABLE,
     GOLD_ECOSYSTEM_HOURLY_TABLE,
@@ -186,7 +187,10 @@ USING (
            {METRIC_DEFINITIONS_VERSION} AS metric_version,
            '{run_id}' AS gold_run_id,
            current_timestamp() AS gold_built_at,
-           '{SOURCE_BIGQUERY}' AS source
+           '{SOURCE_BIGQUERY}' AS source,
+           {eras.era_case_sql('event_hour')} AS era,
+           {eras.era_ordinal_sql('event_hour')} AS era_ordinal,
+           {eras.in_outage_sql('event_hour')} AS in_outage
     FROM {BQ_LIFECYCLE_HOURLY_TABLE}
 ) AS s
 ON t.event_hour = s.event_hour

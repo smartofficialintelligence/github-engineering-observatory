@@ -24,6 +24,7 @@ import logging
 import uuid
 from typing import Any
 
+from github_observatory.schema import eras
 from github_observatory.common.config import (
     GOLD_ECOSYSTEM_HOURLY_TABLE,
     GOLD_ECOSYSTEM_VELOCITY_VIEW,
@@ -45,7 +46,7 @@ PRODUCTION_EVENTS: dict[str, tuple[str, ...] | None] = {
     "ReleaseEvent": ("published",),
 }
 
-METRIC_DEFINITIONS_VERSION = 4
+METRIC_DEFINITIONS_VERSION = 5
 
 # Columns added in v4 (docs/lifecycle_metrics_spec.md v1 + metric_definitions v4):
 # denominators, issue closure taxonomy, review states, three comment classes,
@@ -62,6 +63,17 @@ V4_LIFECYCLE_COLUMNS = (
     "release_download_count_sum",
 )
 
+# v5: per-row comparability context. `era` names the feed regime,
+# `in_outage` marks rows that fall inside a GH Archive collection failure
+# (floors, not measurements), and `era_ordinal` exposes the era's position
+# so "at least as constrained as X" is a numeric comparison a dashboard
+# filter can express.
+V5_COMPARABILITY_COLUMNS: dict[str, str] = {
+    "era": "STRING",
+    "era_ordinal": "INT",
+    "in_outage": "BOOLEAN",
+}
+
 ECOSYSTEM_HOURLY_DDL = (
     "event_hour TIMESTAMP, "
     "total_events BIGINT, total_events_human BIGINT, "
@@ -76,7 +88,11 @@ ECOSYSTEM_HOURLY_DDL = (
     "distinct_repos BIGINT, distinct_push_repos BIGINT, "
     + ", ".join(f"{c} BIGINT" for c in V4_LIFECYCLE_COLUMNS) + ", "
     "metric_version INT, gold_run_id STRING, gold_built_at TIMESTAMP, "
-    "source STRING"
+    "source STRING, "
+    # v5 comparability columns, derived from schema/eras.py. They let a
+    # dashboard filter to a comparable subset without every query
+    # re-encoding the boundary dates.
+    + ", ".join(f"{c} {t}" for c, t in V5_COMPARABILITY_COLUMNS.items())
 )
 
 
@@ -214,7 +230,10 @@ SELECT
     {METRIC_DEFINITIONS_VERSION} AS metric_version,
     '{run_id}' AS gold_run_id,
     current_timestamp() AS gold_built_at,
-    'stream' AS source
+    'stream' AS source,
+    {eras.era_case_sql('b.event_hour')} AS era,
+    {eras.era_ordinal_sql('b.event_hour')} AS era_ordinal,
+    {eras.in_outage_sql('b.event_hour')} AS in_outage
 FROM base b
 LEFT JOIN issue_extras ie USING (event_hour)
 LEFT JOIN review_extras rv USING (event_hour)
@@ -291,6 +310,21 @@ def create_gold_tables(spark: Any) -> None:
         spark.sql(f"ALTER TABLE {GOLD_ECOSYSTEM_HOURLY_TABLE} ADD COLUMNS ({cols_sql})")
         logger.info("added v4 lifecycle columns to %s: %s",
                     GOLD_ECOSYSTEM_HOURLY_TABLE, missing_v4)
+    # v5: comparability context. Backfilled for every existing row from the
+    # boundary definitions, so history gets classified without a rebuild.
+    missing_v5 = [c for c in V5_COMPARABILITY_COLUMNS if c not in columns]
+    if missing_v5:
+        cols_sql = ", ".join(f"{c} {V5_COMPARABILITY_COLUMNS[c]}" for c in missing_v5)
+        spark.sql(f"ALTER TABLE {GOLD_ECOSYSTEM_HOURLY_TABLE} ADD COLUMNS ({cols_sql})")
+        logger.info("added v5 comparability columns to %s: %s",
+                    GOLD_ECOSYSTEM_HOURLY_TABLE, missing_v5)
+    spark.sql(f"""
+        UPDATE {GOLD_ECOSYSTEM_HOURLY_TABLE}
+        SET era = {eras.era_case_sql('event_hour')},
+            era_ordinal = {eras.era_ordinal_sql('event_hour')},
+            in_outage = {eras.in_outage_sql('event_hour')}
+        WHERE era IS NULL OR era_ordinal IS NULL OR in_outage IS NULL
+    """)
     spark.sql(ecosystem_velocity_view_sql())
 
 

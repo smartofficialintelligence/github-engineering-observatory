@@ -51,6 +51,8 @@ def test_census_and_payload_columns_partition_gold_metrics():
     gold_cols = {c.strip().split()[0] for c in ECOSYSTEM_HOURLY_DDL.split(",")}
     metric_cols = gold_cols - {
         "event_hour", "metric_version", "gold_run_id", "gold_built_at", "source",
+        # v5 comparability context — derived from event_hour, not measured
+        "era", "era_ordinal", "in_outage",
     }
     assert metric_cols == set(bh.CENSUS_COLUMNS) | set(bh.PAYLOAD_COLUMNS)
     assert not set(bh.CENSUS_COLUMNS) & set(bh.PAYLOAD_COLUMNS)

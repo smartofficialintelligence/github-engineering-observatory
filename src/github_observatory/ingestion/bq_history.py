@@ -27,6 +27,7 @@ import os
 import uuid
 from typing import Any, Iterable
 
+from github_observatory.schema import eras
 from github_observatory.common.config import (
     BQ_ECOSYSTEM_HOURLY_TABLE,
     GOLD_ECOSYSTEM_HOURLY_TABLE,
@@ -176,6 +177,9 @@ def ingest_bronze(spark: Any, rows: Iterable[dict[str, Any]], *, run_id: str | N
 
 
 def gold_merge_sql(run_id: str) -> str:
+    """Historical census rows into Gold. Must emit the v5 comparability
+    columns too: the MERGE uses INSERT *, so source and target schemas
+    have to line up."""
     null_cols = ",\n           ".join(
         f"CAST(NULL AS BIGINT) AS {c}" for c in PAYLOAD_COLUMNS
     )
@@ -188,7 +192,10 @@ USING (
            {METRIC_DEFINITIONS_VERSION} AS metric_version,
            '{run_id}' AS gold_run_id,
            current_timestamp() AS gold_built_at,
-           '{SOURCE_BIGQUERY}' AS source
+           '{SOURCE_BIGQUERY}' AS source,
+           {eras.era_case_sql('event_hour')} AS era,
+           {eras.era_ordinal_sql('event_hour')} AS era_ordinal,
+           {eras.in_outage_sql('event_hour')} AS in_outage
     FROM {BQ_ECOSYSTEM_HOURLY_TABLE}
 ) AS s
 ON t.event_hour = s.event_hour

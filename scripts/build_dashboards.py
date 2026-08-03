@@ -15,13 +15,120 @@ import json
 import os
 import sys
 
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+from github_observatory.schema import eras  # noqa: E402
+
 OUT_DIR = os.path.join(os.path.dirname(__file__), "..", "dashboards")
 
 G = "github_observatory.gold"
 
 
-def dataset(name: str, query: str) -> dict:
-    return {"name": name, "displayName": name, "queryLines": [query]}
+# The standardize control. Off by default so the dashboard still opens on
+# the full record; switching it on applies the constraints of the most
+# constrained era to the whole series, which is the only way a decade-long
+# line is honest. See docs/normalization_basis.md.
+STANDARDIZE_PARAM = "standardize"
+STANDARDIZE_ON = "Standardized (comparable across eras)"
+STANDARDIZE_OFF = "Raw (as collected)"
+
+STANDARDIZE_LABEL = "Comparability"
+
+STANDARDIZE_NOTE = """\
+**Comparability control.** *Raw* shows the record as collected. *Standardized*
+applies the constraints of the most constrained era to the whole series:
+collection-outage days are dropped (they are floors, not measurements), and
+metrics read NULL where the signal was structurally absent rather than 0 — a
+zero is indistinguishable from "it stopped happening". Sampling distortion is
+**not** repaired by this control; absolute levels still are not comparable
+across 2025-06-01, only shares and within-era trend. See
+`docs/normalization_basis.md`."""
+
+
+def dataset(name: str, query: str, *, standardizable: bool = False) -> dict:
+    """A Lakeview dataset. ``standardizable`` declares the standardize
+    parameter so the query can reference :standardize."""
+    d = {"name": name, "displayName": name, "queryLines": [query]}
+    if standardizable:
+        d["parameters"] = [{
+            "displayName": STANDARDIZE_PARAM,
+            "keyword": STANDARDIZE_PARAM,
+            "dataType": "STRING",
+            "defaultSelection": {
+                "values": {"dataType": "STRING",
+                           "values": [{"value": STANDARDIZE_OFF}]}
+            },
+        }]
+    return d
+
+
+def std_metric(metric: str, ts: str = "event_hour") -> str:
+    """Metric expression that blanks out where it is structurally absent,
+    but only when the viewer has asked to standardize.
+
+    A structural zero is worse than a gap: `pr_merged` reads 0 through
+    merge_blind, which is indistinguishable from "no merges happened"
+    when it means "the signal was removed". Standardizing turns those
+    into NULL so the chart shows the hole.
+    """
+    guarded = eras.null_outside_valid_eras_sql(metric, ts)
+    if guarded == metric:
+        return metric  # valid everywhere, nothing to gate
+    return (f"CASE WHEN :{STANDARDIZE_PARAM} = '{STANDARDIZE_ON}' "
+            f"THEN ({guarded}) ELSE {metric} END")
+
+
+# Collection outages are floors, not measurements — drop them when
+# standardizing. Gold carries in_outage; other sources derive it.
+STD_OUTAGE_WHERE = (
+    f"(:{STANDARDIZE_PARAM} != '{STANDARDIZE_ON}' OR NOT in_outage)"
+)
+
+
+def std_outage_where(ts: str = "event_hour") -> str:
+    """Same guard for datasets that lack the in_outage column."""
+    return (f"(:{STANDARDIZE_PARAM} != '{STANDARDIZE_ON}' "
+            f"OR NOT {eras.in_outage_sql(ts)})")
+
+
+def filter_widget(name, title, dataset_names, pos):
+    """Single-select bound to the standardize parameter across datasets.
+
+    One control drives every standardizable dataset on the page, because
+    they all declare the same parameter keyword.
+    """
+    queries = [
+        {"name": f"param_{i}",
+         "query": {"datasetName": ds,
+                   "parameters": [{"name": STANDARDIZE_PARAM,
+                                   "keyword": STANDARDIZE_PARAM}],
+                   "disaggregated": False}}
+        for i, ds in enumerate(dataset_names)
+    ]
+    return {
+        "widget": {
+            "name": name,
+            "queries": queries,
+            "spec": {
+                "version": 2,
+                "widgetType": "filter-single-select",
+                "frame": {"title": title, "showTitle": True},
+                "encodings": {
+                    "fields": [
+                        {"parameterName": STANDARDIZE_PARAM,
+                         "queryName": f"param_{i}"}
+                        for i in range(len(dataset_names))
+                    ]
+                },
+                "selection": {
+                    "defaultSelection": {
+                        "values": {"dataType": "STRING",
+                                   "values": [{"value": STANDARDIZE_OFF}]}
+                    }
+                },
+            },
+        },
+        "position": {"x": pos[0], "y": pos[1], "width": pos[2], "height": pos[3]},
+    }
 
 
 def widget(name, dataset_name, wtype, title, encodings, pos, fields=None):
@@ -171,7 +278,9 @@ OBSERVATORY = {
         dataset("coverage_monthly", f"""
             SELECT date_trunc('MONTH', event_hour) AS month, source,
                    COUNT(*) AS hours_observed
-            FROM {G}.ecosystem_hourly GROUP BY 1, 2"""),
+            FROM {G}.ecosystem_hourly
+            WHERE {STD_OUTAGE_WHERE}
+            GROUP BY 1, 2""", standardizable=True),
         dataset("regime_monthly", f"""
             SELECT date_trunc('MONTH', event_hour) AS month,
                    ROUND(SUM(push_events) / SUM(total_events), 4) AS push_share,
@@ -186,13 +295,17 @@ OBSERVATORY = {
                    CASE WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01'
                         THEN 'full feed (thru May 2025)'
                         ELSE 'filtered feed (Jun 2025 on, OQ-1)' END AS regime
-            FROM {G}.ecosystem_hourly GROUP BY 1, 3"""),
+            FROM {G}.ecosystem_hourly
+            WHERE {STD_OUTAGE_WHERE}
+            GROUP BY 1, 3""", standardizable=True),
         dataset("production_yoy", f"""
             WITH m AS (
                 SELECT date_trunc('MONTH', event_hour) AS month,
                        SUM(push_events) / COUNT(*) AS pushes_per_hour,
                        COUNT(*) AS hours_observed
-                FROM {G}.ecosystem_hourly GROUP BY 1
+                FROM {G}.ecosystem_hourly
+                WHERE {STD_OUTAGE_WHERE}
+                GROUP BY 1
             )
             SELECT c.month,
                    ROUND((c.pushes_per_hour - p.pushes_per_hour)
@@ -205,10 +318,15 @@ OBSERVATORY = {
             WHERE NOT (c.month >= DATE'2025-06-01' AND p.month < DATE'2025-06-01')
               -- partial months bias the comparison (day-of-week mix):
               -- require near-full coverage on both sides
-              AND c.hours_observed >= 600 AND p.hours_observed >= 600"""),
+              AND c.hours_observed >= 600 AND p.hours_observed >= 600""",
+                standardizable=True),
         dataset("production_hourly_stream", f"""
-            SELECT event_hour, production_events, pr_merged, releases_published
-            FROM {G}.ecosystem_hourly WHERE source = 'stream'"""),
+            SELECT event_hour, production_events,
+                   {std_metric('pr_merged')} AS pr_merged,
+                   releases_published
+            FROM {G}.ecosystem_hourly
+            WHERE source = 'stream' AND {STD_OUTAGE_WHERE}""",
+                standardizable=True),
         # ---- flow (census-based, full decade) ------------------------------
         dataset("flow_decade", f"""
             WITH daily AS (
@@ -217,7 +335,9 @@ OBSERVATORY = {
                        AVG(push_events) AS mean,
                        STDDEV_POP(push_events) AS std,
                        SUM(push_events) AS tot
-                FROM {G}.ecosystem_hourly GROUP BY 1
+                FROM {G}.ecosystem_hourly
+                WHERE {STD_OUTAGE_WHERE}
+                GROUP BY 1
             ),
             entropy AS (
                 SELECT CAST(e.event_hour AS DATE) AS day,
@@ -239,12 +359,15 @@ OBSERVATORY = {
                         ELSE 'filtered feed (Jun 2025 on, OQ-1)' END AS regime
             FROM daily d JOIN entropy e USING (day)
             WHERE d.hrs = 24
-            GROUP BY 1, 5"""),
+            GROUP BY 1, 5""", standardizable=True),
         # ---- rework (stream-only, hourly) ----------------------------------
         dataset("rework_hourly", f"""
             SELECT event_hour, pr_reopened, issues_reopened,
-                   pr_closed_no_merge, pr_merged
-            FROM {G}.ecosystem_hourly WHERE source = 'stream'"""),
+                   {std_metric('pr_closed_no_merge')} AS pr_closed_no_merge,
+                   {std_metric('pr_merged')} AS pr_merged
+            FROM {G}.ecosystem_hourly
+            WHERE source = 'stream' AND {STD_OUTAGE_WHERE}""",
+                standardizable=True),
         dataset("review_hourly", """
             SELECT date_trunc('HOUR', created_at) AS event_hour, review_state,
                    COUNT(*) AS reviews
@@ -256,7 +379,9 @@ OBSERVATORY = {
                    CASE WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01'
                         THEN 'full feed (thru May 2025)'
                         ELSE 'filtered feed (Jun 2025 on, OQ-1)' END AS regime
-            FROM {G}.ecosystem_hourly GROUP BY 1, 3"""),
+            FROM {G}.ecosystem_hourly
+            WHERE {STD_OUTAGE_WHERE}
+            GROUP BY 1, 3""", standardizable=True),
         dataset("actors_decade", f"""
             SELECT date_trunc('MONTH', event_hour) AS month,
                    CAST(AVG(distinct_actors) AS BIGINT) AS avg_hourly_actors,
@@ -265,7 +390,9 @@ OBSERVATORY = {
                    CASE WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01'
                         THEN 'full feed (thru May 2025)'
                         ELSE 'filtered feed (Jun 2025 on, OQ-1)' END AS regime
-            FROM {G}.ecosystem_hourly GROUP BY 1, 4"""),
+            FROM {G}.ecosystem_hourly
+            WHERE {STD_OUTAGE_WHERE}
+            GROUP BY 1, 4""", standardizable=True),
         dataset("contribution", f"""
             SELECT event_date, new_actors,
                    ROUND(top100_actor_share, 4) AS top100_actor_share,
@@ -313,6 +440,8 @@ OBSERVATORY = {
                        line_enc("month", "push_share", color="regime"),
                        (0, 8, 3, 7),
                        fields=[field("month"), field("push_share"), field("regime")]),
+                filter_widget("std_provenance", STANDARDIZE_LABEL,
+                              ["coverage_monthly"], (0, 15, 3, 2)),
                 widget("coverage", "coverage_monthly", "bar",
                        "Hours observed per month, by source (gaps = archive outages)",
                        line_enc("month", "hours_observed", color="source"),
@@ -324,6 +453,10 @@ OBSERVATORY = {
             "name": "production",
             "displayName": "Production",
             "layout": [
+                filter_widget("std_production", STANDARDIZE_LABEL,
+                              ["production_decade", "production_yoy",
+                               "production_hourly_stream"], (0, 0, 3, 2)),
+                text_widget("std_production_note", STANDARDIZE_NOTE, (3, 0, 3, 2)),
                 widget("pushes_decade", "production_decade", "line",
                        "Pushes per hour, monthly avg — the production unit, 2016-present",
                        line_enc("month", "pushes_per_hour", color="regime"),
@@ -351,6 +484,8 @@ OBSERVATORY = {
             "name": "flow",
             "displayName": "Flow",
             "layout": [
+                filter_widget("std_flow", STANDARDIZE_LABEL,
+                              ["flow_decade"], (0, 0, 3, 2)),
                 text_widget("flow_note", PAGE_NOTES["flow"], (0, 0, 6, 2)),
                 widget("flow_burstiness", "flow_decade", "line",
                        "Burstiness of hourly pushes — monthly avg of daily values",
@@ -373,6 +508,8 @@ OBSERVATORY = {
             "name": "rework",
             "displayName": "Rework",
             "layout": [
+                filter_widget("std_rework", STANDARDIZE_LABEL,
+                              ["rework_hourly"], (0, 0, 3, 2)),
                 text_widget("rework_note", PAGE_NOTES["rework"], (0, 0, 6, 2)),
                 widget("reopens_hourly", "rework_hourly", "line",
                        "Reopened PRs and issues per hour",
@@ -398,6 +535,9 @@ OBSERVATORY = {
             "name": "contribution",
             "displayName": "Contribution",
             "layout": [
+                filter_widget("std_contribution", STANDARDIZE_LABEL,
+                              ["bot_share_decade", "actors_decade"], (0, 0, 3, 2)),
+                text_widget("std_contribution_note", STANDARDIZE_NOTE, (3, 0, 3, 2)),
                 widget("bot_curve", "bot_share_decade", "line",
                        "Bot share of all events — the automation curve, 2016-present",
                        line_enc("month", "bot_share", color="regime"),
@@ -555,9 +695,65 @@ DASHBOARDS = {
 }
 
 
+def reserve_header_band(definition: dict) -> None:
+    """Move the standardize control to the top of its page and push the
+    page's own tiles down to make room.
+
+    Done as a post-pass so page layouts stay written in their natural
+    coordinates; adding a control never requires renumbering tiles by
+    hand, which is how the first attempt produced overlaps.
+    """
+    for page in definition["pages"]:
+        band = [w for w in page["layout"]
+                if w["widget"]["name"].startswith("std_")]
+        if not band:
+            continue
+        height = max(w["position"]["height"] for w in band)
+        for w in page["layout"]:
+            if w in band:
+                w["position"]["y"] = 0
+            else:
+                w["position"]["y"] += height
+
+
+def assert_no_overlaps(definition: dict, filename: str) -> None:
+    """Fail the build on overlapping tiles — Lakeview renders them stacked
+    and the damage is easy to miss in a screenshot."""
+    def hits(a, b):
+        return not (a["x"] + a["width"] <= b["x"] or b["x"] + b["width"] <= a["x"]
+                    or a["y"] + a["height"] <= b["y"] or b["y"] + b["height"] <= a["y"])
+    for page in definition["pages"]:
+        items = [(w["widget"]["name"], w["position"]) for w in page["layout"]]
+        for i in range(len(items)):
+            for j in range(i + 1, len(items)):
+                if hits(items[i][1], items[j][1]):
+                    raise SystemExit(
+                        f"{filename} page '{page['displayName']}': "
+                        f"{items[i][0]} overlaps {items[j][0]}"
+                    )
+
+
+def assert_parameters_declared(definition: dict, filename: str) -> None:
+    """A dataset referencing :standardize must declare it, or Lakeview
+    fails the query at render time with an unbound-parameter error."""
+    for ds in definition["datasets"]:
+        sql = " ".join(ds["queryLines"])
+        uses = f":{STANDARDIZE_PARAM}" in sql
+        declares = any(p["keyword"] == STANDARDIZE_PARAM
+                       for p in ds.get("parameters", []))
+        if uses != declares:
+            raise SystemExit(
+                f"{filename}: dataset '{ds['name']}' uses={uses} "
+                f"declares={declares} for :{STANDARDIZE_PARAM}"
+            )
+
+
 def main() -> int:
     os.makedirs(OUT_DIR, exist_ok=True)
     for filename, definition in DASHBOARDS.items():
+        reserve_header_band(definition)
+        assert_no_overlaps(definition, filename)
+        assert_parameters_declared(definition, filename)
         path = os.path.join(OUT_DIR, filename)
         with open(path, "w", encoding="utf-8") as fh:
             json.dump(definition, fh, indent=2)

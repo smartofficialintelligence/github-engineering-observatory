@@ -77,7 +77,12 @@ def test_synthetic_hour_fully_hand_computed(gold_built):
     # event 6 has assets with download_count 5, 7, and NULL → sum 12
     assert row["release_download_count_sum"] == 12
     assert row["metric_version"] == gold_metrics.METRIC_DEFINITIONS_VERSION
-    assert row["metric_version"] == 4  # explicit anchor: this test is a v4 test
+    assert row["metric_version"] == 5  # explicit anchor: this test is a v5 test
+    # v5 comparability context. The synthetic hour is 2026-01-01, which
+    # falls in merge_restored and in no outage window.
+    assert row["era"] == "merge_restored"
+    assert row["era_ordinal"] == 3
+    assert row["in_outage"] is False
 
 
 def test_gold_upsert_is_idempotent(gold_built):
