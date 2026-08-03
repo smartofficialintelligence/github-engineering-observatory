@@ -89,12 +89,28 @@ Two consequences dominate everything downstream:
   2025-10-09 and 2025-12-01 neither exists and `pr_merged` is
   unrecoverable — it reads 0, and `pr_closed_no_merge` is correspondingly
   inflated because former merges fall into it.
-* **Commit data.** `payload.commits` never returned either. Commit-level
-  metrics are computable for 2015-01-01 → 2025-10-08 and are permanently
-  unavailable after. This is the sharpest normalization trade in the
-  project: normalizing everything down to the current era would discard
-  ten years of commit-level history to gain comparability with the last
-  few months.
+* **Commit data.** PushEvent lost `payload.commits`, `payload.size` and
+  `payload.distinct_size` together — all at 100% presence the month
+  before — and none returned. `size` is the costly one: it carried the
+  commit count as a plain integer. Commit metrics are therefore
+  census-quality for 2015-01-01 → 2025-10-08 and unavailable in-stream
+  after. This is the sharpest normalization trade in the project:
+  normalizing everything down to the current era would discard ten years
+  of commit-level history to gain comparability with the last few months.
+
+  Not entirely lost, though. `before` and `head` survived the collapse,
+  so each push still identifies its exact commit range, and GitHub's
+  compare API (`/repos/{owner}/{repo}/compare/{before}...{head}`) returns
+  `total_commits` for it. At 5,000 authenticated requests/hour against
+  ~150k pushes/hour that covers ~3% of the stream — useless as a census,
+  but sufficient for a sampled repo panel, which is the defensible way to
+  measure commit volume anyway. Tracked as an enrichment option rather
+  than a plan.
+
+  Verified that this is a source loss, not a distribution artifact: the
+  BigQuery mirror is built from the same hourly files and shows the same
+  five-field payload. Its extra `other` column carries only an actor
+  overflow (`{"actor":{"display_login":...}}`), not payload data.
 
 ## Collection outages
 
