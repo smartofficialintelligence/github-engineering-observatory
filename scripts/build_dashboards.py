@@ -25,23 +25,27 @@ G = "github_observatory.gold"
 
 # The comparability control.
 #
-# Implemented as a real column rather than a query parameter. A Lakeview
-# string parameter has no list of legal values, so its filter widget
-# degrades to a free-text box — the viewer sees a blank field and no way
-# to discover the modes. Emitting both modes as rows and filtering on the
-# resulting column gives an ordinary single-select dropdown, which is
-# discoverable and can carry a default.
+# A parameter, not a column. Two earlier attempts failed differently and
+# both lessons are encoded here:
 #
-# Cost is a doubled row count on aggregate datasets of a few thousand
-# rows, which is nothing next to a control nobody can find.
-COMPARABILITY_COL = "comparability"
+#   * A bare string parameter has no value list, so its widget degrades to
+#     a free-text box — a control nobody can discover. Fixed by sourcing
+#     the options from a dataset (COMPARABILITY_MODES) and wiring the
+#     filter's field encoding to it, per the query-based-dropdown pattern.
+#   * A column filter renders a dropdown but always offers "All", which
+#     with a two-mode union meant plotting both modes at once.
+#
+# Databricks sets the parameter to NULL when "All" is chosen, so every
+# comparison below reads it through IFNULL and treats NULL as Standardized.
+# "All" therefore degrades to the safe view rather than to nonsense, and
+# the data defaults to standardized even if the widget's own default is
+# ever lost.
+STANDARDIZE_PARAM = "standardize"
 MODE_STD = "Standardized (comparable across eras)"
 MODE_RAW = "Raw (as collected)"
 
-# Standardized is the default: the whole point of the exercise is that the
-# raw series misleads across era boundaries, so the honest view is the one
-# that greets you.
-MODE_DEFAULT = MODE_STD
+# Resolved mode: NULL ("All") and anything unrecognised mean Standardized.
+_MODE = f"IFNULL(:{STANDARDIZE_PARAM}, '{MODE_STD}')"
 
 STANDARDIZE_LABEL = "Comparability"
 
@@ -55,63 +59,81 @@ record as collected. Sampling distortion is **not** repaired either way;
 absolute levels remain incomparable across 2025-06-01, only shares and
 within-era trend. See `docs/normalization_basis.md`."""
 
+# Static option list for the dropdown. A dataset is required — the filter
+# widget takes its selectable values from a field, not from a literal.
+COMPARABILITY_MODES_DATASET = "comparability_modes"
 
-def dual_mode(build) -> str:
-    """Emit one dataset carrying both comparability modes as rows.
 
-    ``build(standardized: bool)`` returns the SELECT for one mode; the two
-    are labelled and unioned. Each dataset keeps its own logic for what
-    standardizing means, which differs — some only drop outage rows,
-    others also NULL a structurally-absent metric.
-    """
-    return (
-        f"SELECT '{MODE_RAW}' AS {COMPARABILITY_COL}, * FROM ({build(False)})\n"
-        f"UNION ALL\n"
-        f"SELECT '{MODE_STD}' AS {COMPARABILITY_COL}, * FROM ({build(True)})"
+def modes_dataset() -> dict:
+    return dataset(
+        COMPARABILITY_MODES_DATASET,
+        f"SELECT * FROM (VALUES ('{MODE_STD}'), ('{MODE_RAW}')) AS t(mode)",
     )
 
 
-def dataset(name: str, query: str) -> dict:
-    return {"name": name, "displayName": name, "queryLines": [query]}
+def dataset(name: str, query: str, *, standardizable: bool = False) -> dict:
+    """A Lakeview dataset. ``standardizable`` declares the parameter so the
+    query may reference :standardize."""
+    d = {"name": name, "displayName": name, "queryLines": [query]}
+    if standardizable:
+        d["parameters"] = [{
+            "displayName": STANDARDIZE_PARAM,
+            "keyword": STANDARDIZE_PARAM,
+            "dataType": "STRING",
+            "defaultSelection": {
+                "values": {"dataType": "STRING",
+                           "values": [{"value": MODE_STD}]}
+            },
+        }]
+    return d
 
 
-def std_metric(metric: str, standardized: bool, ts: str = "event_hour") -> str:
-    """Blank a metric out where it is structurally absent.
+def std_metric(metric: str, ts: str = "event_hour") -> str:
+    """Blank a metric out where it is structurally absent, under
+    Standardized only.
 
     A structural zero is worse than a gap: `pr_merged` reads 0 through
     merge_blind, which is indistinguishable from "no merges happened"
     when it means "the signal was removed". NULL draws the hole.
     """
-    if not standardized:
-        return metric
-    return eras.null_outside_valid_eras_sql(metric, ts)
+    guarded = eras.null_outside_valid_eras_sql(metric, ts)
+    if guarded == metric:
+        return metric  # valid in every era, nothing to gate
+    return f"CASE WHEN {_MODE} = '{MODE_STD}' THEN ({guarded}) ELSE {metric} END"
 
 
-def outage_where(standardized: bool, ts: str | None = None) -> str:
-    """WHERE fragment excluding collection outages when standardizing.
+def outage_where(ts: str | None = None) -> str:
+    """WHERE fragment dropping collection outages under Standardized.
 
     ``ts=None`` uses Gold's stored in_outage column; passing a timestamp
     derives the same predicate for sources that lack it.
     """
-    if not standardized:
-        return "TRUE"
-    return "NOT in_outage" if ts is None else f"NOT {eras.in_outage_sql(ts)}"
+    col = "in_outage" if ts is None else eras.in_outage_sql(ts)
+    return f"({_MODE} = '{MODE_RAW}' OR NOT {col})"
 
 
 def filter_widget(name, title, dataset_names, pos):
-    """Single-select on the comparability column across several datasets.
-
-    One control drives every dataset listed, because they all expose the
-    same column name.
-    """
+    """Dropdown whose options come from COMPARABILITY_MODES_DATASET and
+    which sets the :standardize parameter on each dataset listed."""
     queries = [
-        {"name": f"f_{i}",
-         "query": {"datasetName": ds,
-                   "fields": [{"name": COMPARABILITY_COL,
-                               "expression": f"`{COMPARABILITY_COL}`"}],
+        {"name": "options",
+         "query": {"datasetName": COMPARABILITY_MODES_DATASET,
+                   "fields": [{"name": "mode", "expression": "`mode`"}],
                    "disaggregated": False}}
-        for i, ds in enumerate(dataset_names)
     ]
+    fields = [{"fieldName": "mode", "displayName": "mode",
+               "queryName": "options"}]
+    for i, ds in enumerate(dataset_names):
+        qn = f"param_{i}"
+        queries.append({
+            "name": qn,
+            "query": {"datasetName": ds,
+                      "parameters": [{"name": STANDARDIZE_PARAM,
+                                      "keyword": STANDARDIZE_PARAM}],
+                      "disaggregated": False},
+        })
+        fields.append({"parameterName": STANDARDIZE_PARAM, "queryName": qn})
+
     return {
         "widget": {
             "name": name,
@@ -120,18 +142,11 @@ def filter_widget(name, title, dataset_names, pos):
                 "version": 2,
                 "widgetType": "filter-single-select",
                 "frame": {"title": title, "showTitle": True},
-                "encodings": {
-                    "fields": [
-                        {"fieldName": COMPARABILITY_COL,
-                         "displayName": COMPARABILITY_COL,
-                         "queryName": f"f_{i}"}
-                        for i in range(len(dataset_names))
-                    ]
-                },
+                "encodings": {"fields": fields},
                 "selection": {
                     "defaultSelection": {
                         "values": {"dataType": "STRING",
-                                   "values": [{"value": MODE_DEFAULT}]}
+                                   "values": [{"value": MODE_STD}]}
                     }
                 },
             },
@@ -283,39 +298,40 @@ PAGE_NOTES = {
 
 OBSERVATORY = {
     "datasets": [
+        modes_dataset(),
         # ---- provenance & coverage -----------------------------------------
-        dataset("coverage_monthly", dual_mode(lambda std: f"""
+        dataset("coverage_monthly", f"""
             SELECT date_trunc('MONTH', event_hour) AS month, source,
                    COUNT(*) AS hours_observed
             FROM {G}.ecosystem_hourly
-            WHERE {outage_where(std)}
-            GROUP BY 1, 2""")),
-        dataset("regime_monthly", dual_mode(lambda std: f"""
+            WHERE {outage_where()}
+            GROUP BY 1, 2""", standardizable=True),
+        dataset("regime_monthly", f"""
             SELECT date_trunc('MONTH', event_hour) AS month,
                    ROUND(SUM(push_events) / SUM(total_events), 4) AS push_share,
                    CASE WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01'
                         THEN 'full feed (thru May 2025)'
                         ELSE 'filtered feed (Jun 2025 on, OQ-1)' END AS regime
             FROM {G}.ecosystem_hourly
-            WHERE {outage_where(std)}
-            GROUP BY 1, 3""")),
+            WHERE {outage_where()}
+            GROUP BY 1, 3""", standardizable=True),
         # ---- production ----------------------------------------------------
-        dataset("production_decade", dual_mode(lambda std: f"""
+        dataset("production_decade", f"""
             SELECT date_trunc('MONTH', event_hour) AS month,
                    CAST(SUM(push_events) / COUNT(*) AS BIGINT) AS pushes_per_hour,
                    CASE WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01'
                         THEN 'full feed (thru May 2025)'
                         ELSE 'filtered feed (Jun 2025 on, OQ-1)' END AS regime
             FROM {G}.ecosystem_hourly
-            WHERE {outage_where(std)}
-            GROUP BY 1, 3""")),
-        dataset("production_yoy", dual_mode(lambda std: f"""
+            WHERE {outage_where()}
+            GROUP BY 1, 3""", standardizable=True),
+        dataset("production_yoy", f"""
             WITH m AS (
                 SELECT date_trunc('MONTH', event_hour) AS month,
                        SUM(push_events) / COUNT(*) AS pushes_per_hour,
                        COUNT(*) AS hours_observed
                 FROM {G}.ecosystem_hourly
-                WHERE {outage_where(std)}
+                WHERE {outage_where()}
                 GROUP BY 1
             )
             SELECT c.month,
@@ -329,15 +345,15 @@ OBSERVATORY = {
             WHERE NOT (c.month >= DATE'2025-06-01' AND p.month < DATE'2025-06-01')
               -- partial months bias the comparison (day-of-week mix):
               -- require near-full coverage on both sides
-              AND c.hours_observed >= 600 AND p.hours_observed >= 600""")),
-        dataset("production_hourly_stream", dual_mode(lambda std: f"""
+              AND c.hours_observed >= 600 AND p.hours_observed >= 600""", standardizable=True),
+        dataset("production_hourly_stream", f"""
             SELECT event_hour, production_events,
-                   {std_metric('pr_merged', std)} AS pr_merged,
+                   {std_metric('pr_merged')} AS pr_merged,
                    releases_published
             FROM {G}.ecosystem_hourly
-            WHERE source = 'stream' AND {outage_where(std)}""")),
+            WHERE source = 'stream' AND {outage_where()}""", standardizable=True),
         # ---- flow (census-based, full decade) ------------------------------
-        dataset("flow_decade", dual_mode(lambda std: f"""
+        dataset("flow_decade", f"""
             WITH daily AS (
                 SELECT CAST(event_hour AS DATE) AS day,
                        COUNT(*) AS hrs,
@@ -345,7 +361,7 @@ OBSERVATORY = {
                        STDDEV_POP(push_events) AS std,
                        SUM(push_events) AS tot
                 FROM {G}.ecosystem_hourly
-                WHERE {outage_where(std)}
+                WHERE {outage_where()}
                 GROUP BY 1
             ),
             entropy AS (
@@ -368,31 +384,31 @@ OBSERVATORY = {
                         ELSE 'filtered feed (Jun 2025 on, OQ-1)' END AS regime
             FROM daily d JOIN entropy e USING (day)
             WHERE d.hrs = 24
-            GROUP BY 1, 5""")),
+            GROUP BY 1, 5""", standardizable=True),
         # ---- rework (stream-only, hourly) ----------------------------------
-        dataset("rework_hourly", dual_mode(lambda std: f"""
+        dataset("rework_hourly", f"""
             SELECT event_hour, pr_reopened, issues_reopened,
-                   {std_metric('pr_closed_no_merge', std)} AS pr_closed_no_merge,
-                   {std_metric('pr_merged', std)} AS pr_merged
+                   {std_metric('pr_closed_no_merge')} AS pr_closed_no_merge,
+                   {std_metric('pr_merged')} AS pr_merged
             FROM {G}.ecosystem_hourly
-            WHERE source = 'stream' AND {outage_where(std)}""")),
-        dataset("review_hourly", dual_mode(lambda std: f"""
+            WHERE source = 'stream' AND {outage_where()}""", standardizable=True),
+        dataset("review_hourly", f"""
             SELECT date_trunc('HOUR', created_at) AS event_hour, review_state,
                    COUNT(*) AS reviews
             FROM github_observatory.silver.review_events
-            WHERE {outage_where(std, 'created_at')}
-            GROUP BY 1, 2""")),
+            WHERE {outage_where('created_at')}
+            GROUP BY 1, 2""", standardizable=True),
         # ---- contribution --------------------------------------------------
-        dataset("bot_share_decade", dual_mode(lambda std: f"""
+        dataset("bot_share_decade", f"""
             SELECT date_trunc('MONTH', event_hour) AS month,
                    ROUND(SUM(bot_events) / SUM(total_events), 4) AS bot_share,
                    CASE WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01'
                         THEN 'full feed (thru May 2025)'
                         ELSE 'filtered feed (Jun 2025 on, OQ-1)' END AS regime
             FROM {G}.ecosystem_hourly
-            WHERE {outage_where(std)}
-            GROUP BY 1, 3""")),
-        dataset("actors_decade", dual_mode(lambda std: f"""
+            WHERE {outage_where()}
+            GROUP BY 1, 3""", standardizable=True),
+        dataset("actors_decade", f"""
             SELECT date_trunc('MONTH', event_hour) AS month,
                    CAST(AVG(distinct_actors) AS BIGINT) AS avg_hourly_actors,
                    CAST(AVG(distinct_actors_human) AS BIGINT)
@@ -401,48 +417,48 @@ OBSERVATORY = {
                         THEN 'full feed (thru May 2025)'
                         ELSE 'filtered feed (Jun 2025 on, OQ-1)' END AS regime
             FROM {G}.ecosystem_hourly
-            WHERE {outage_where(std)}
-            GROUP BY 1, 4""")),
-        dataset("contribution", dual_mode(lambda std: f"""
+            WHERE {outage_where()}
+            GROUP BY 1, 4""", standardizable=True),
+        dataset("contribution", f"""
             SELECT event_date, new_actors,
                    ROUND(top100_actor_share, 4) AS top100_actor_share,
                    events_per_actor_p50, events_per_actor_p90, events_per_actor_p99
             FROM {G}.contribution_daily
-            WHERE {outage_where(std, 'event_date')}""")),
+            WHERE {outage_where('event_date')}""", standardizable=True),
         # ---- engagement (stream-only, hourly) ------------------------------
-        dataset("engagement_hourly", dual_mode(lambda std: f"""
+        dataset("engagement_hourly", f"""
             SELECT date_trunc('HOUR', created_at) AS event_hour,
                    COUNT_IF(event_type = 'WatchEvent') AS stars,
                    COUNT_IF(event_type = 'ForkEvent') AS forks
             FROM github_observatory.silver.events
             WHERE quality_flag IS NULL AND created_at IS NOT NULL
               AND event_type IN ('WatchEvent', 'ForkEvent')
-              AND {outage_where(std, 'created_at')}
-            GROUP BY 1""")),
+              AND {outage_where('created_at')}
+            GROUP BY 1""", standardizable=True),
         # ---- sustainability & network --------------------------------------
-        dataset("retention", dual_mode(lambda std: f"""
+        dataset("retention", f"""
             SELECT event_date, active_actors, active_actors_human,
                    ROUND(retention_1d, 4) AS retention_1d,
                    ROUND(retention_7d, 4) AS retention_7d
             FROM {G}.actor_retention_daily
-            WHERE {outage_where(std, 'event_date')}""")),
-        dataset("network", dual_mode(lambda std: f"""
+            WHERE {outage_where('event_date')}""", standardizable=True),
+        dataset("network", f"""
             SELECT event_date,
                    ROUND(multi_repo_actor_share, 4) AS multi_repo_actor_share,
                    ROUND(single_actor_repo_share, 4) AS single_actor_repo_share
             FROM {G}.network_daily
-            WHERE {outage_where(std, 'event_date')}""")),
+            WHERE {outage_where('event_date')}""", standardizable=True),
         # ---- forecasting ---------------------------------------------------
         dataset("forecast_eval", f"""
             SELECT target, method, n_predictions, ROUND(mae, 1) AS mae,
                    ROUND(smape, 4) AS smape, ROUND(mase, 3) AS mase
             FROM {G}.forecast_eval ORDER BY target, mase"""),
-        dataset("forecast_fit", dual_mode(lambda std: f"""
+        dataset("forecast_fit", f"""
             SELECT event_hour, actual, prediction
             FROM {G}.forecast_predictions
             WHERE target = 'total_events' AND method = 'seasonal_24h'
               AND event_hour >= current_timestamp() - INTERVAL 30 DAYS
-              AND {outage_where(std, 'event_hour')}""")),
+              AND {outage_where('event_hour')}""", standardizable=True),
     ],
     "pages": [
         {
@@ -757,36 +773,46 @@ def assert_no_overlaps(definition: dict, filename: str) -> None:
 
 
 def assert_control_wiring(definition: dict, filename: str) -> None:
-    """Every dataset a filter drives must expose the comparability column,
-    and every dual-mode dataset must be reachable by some filter.
+    """Check the two ways this control has already broken.
 
-    The first half catches a filter bound to a dataset that never got
-    converted; the second catches a converted dataset with no way to
-    switch it, which is how the previous attempt shipped a control the
-    viewer could not find.
+    A dataset referencing :standardize but not declaring it fails only at
+    render time with an unbound-parameter error. A filter with no options
+    query renders as a free-text box — present in the JSON, undiscoverable
+    in the UI, which is exactly how the first version shipped.
     """
-    dual = {ds["name"] for ds in definition["datasets"]
-            if f"'{MODE_STD}' AS {COMPARABILITY_COL}" in " ".join(ds["queryLines"])}
-    driven: set[str] = set()
+    for ds in definition["datasets"]:
+        sql = " ".join(ds["queryLines"])
+        uses = f":{STANDARDIZE_PARAM}" in sql
+        declares = any(p["keyword"] == STANDARDIZE_PARAM
+                       for p in ds.get("parameters", []))
+        if uses != declares:
+            raise SystemExit(
+                f"{filename}: dataset '{ds['name']}' uses={uses} "
+                f"declares={declares} for :{STANDARDIZE_PARAM}"
+            )
+
+    names = {ds["name"] for ds in definition["datasets"]}
     for page in definition["pages"]:
         for w in page["layout"]:
             spec = w["widget"].get("spec", {})
             if spec.get("widgetType") != "filter-single-select":
                 continue
-            for q in w["widget"]["queries"]:
-                name = q["query"]["datasetName"]
-                driven.add(name)
-                if name not in dual:
-                    raise SystemExit(
-                        f"{filename}: filter '{w['widget']['name']}' drives "
-                        f"'{name}', which has no {COMPARABILITY_COL} column"
-                    )
-    orphans = sorted(dual - driven)
-    if orphans:
-        raise SystemExit(
-            f"{filename}: dual-mode datasets with no filter to switch them: "
-            f"{orphans}"
-        )
+            fields = spec["encodings"]["fields"]
+            if not any("fieldName" in f for f in fields):
+                raise SystemExit(
+                    f"{filename}: filter '{w['widget']['name']}' has no "
+                    f"options field — it will render as a text box"
+                )
+            if COMPARABILITY_MODES_DATASET not in names:
+                raise SystemExit(
+                    f"{filename}: '{COMPARABILITY_MODES_DATASET}' dataset "
+                    f"is missing; the dropdown has no values to offer"
+                )
+            if not any("parameterName" in f for f in fields):
+                raise SystemExit(
+                    f"{filename}: filter '{w['widget']['name']}' sets no "
+                    f"parameter — it would filter nothing"
+                )
 
 
 def main() -> int:

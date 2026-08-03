@@ -1,101 +1,346 @@
 {
   "datasets": [
     {
+      "name": "comparability_modes",
+      "displayName": "comparability_modes",
+      "queryLines": [
+        "SELECT * FROM (VALUES ('Standardized (comparable across eras)'), ('Raw (as collected)')) AS t(mode)"
+      ]
+    },
+    {
       "name": "coverage_monthly",
       "displayName": "coverage_monthly",
       "queryLines": [
-        "SELECT 'Raw (as collected)' AS comparability, * FROM (\n            SELECT date_trunc('MONTH', event_hour) AS month, source,\n                   COUNT(*) AS hours_observed\n            FROM github_observatory.gold.ecosystem_hourly\n            WHERE TRUE\n            GROUP BY 1, 2)\nUNION ALL\nSELECT 'Standardized (comparable across eras)' AS comparability, * FROM (\n            SELECT date_trunc('MONTH', event_hour) AS month, source,\n                   COUNT(*) AS hours_observed\n            FROM github_observatory.gold.ecosystem_hourly\n            WHERE NOT in_outage\n            GROUP BY 1, 2)"
+        "\n            SELECT date_trunc('MONTH', event_hour) AS month, source,\n                   COUNT(*) AS hours_observed\n            FROM github_observatory.gold.ecosystem_hourly\n            WHERE (IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Raw (as collected)' OR NOT in_outage)\n            GROUP BY 1, 2"
+      ],
+      "parameters": [
+        {
+          "displayName": "standardize",
+          "keyword": "standardize",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "Standardized (comparable across eras)"
+                }
+              ]
+            }
+          }
+        }
       ]
     },
     {
       "name": "regime_monthly",
       "displayName": "regime_monthly",
       "queryLines": [
-        "SELECT 'Raw (as collected)' AS comparability, * FROM (\n            SELECT date_trunc('MONTH', event_hour) AS month,\n                   ROUND(SUM(push_events) / SUM(total_events), 4) AS push_share,\n                   CASE WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01'\n                        THEN 'full feed (thru May 2025)'\n                        ELSE 'filtered feed (Jun 2025 on, OQ-1)' END AS regime\n            FROM github_observatory.gold.ecosystem_hourly\n            WHERE TRUE\n            GROUP BY 1, 3)\nUNION ALL\nSELECT 'Standardized (comparable across eras)' AS comparability, * FROM (\n            SELECT date_trunc('MONTH', event_hour) AS month,\n                   ROUND(SUM(push_events) / SUM(total_events), 4) AS push_share,\n                   CASE WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01'\n                        THEN 'full feed (thru May 2025)'\n                        ELSE 'filtered feed (Jun 2025 on, OQ-1)' END AS regime\n            FROM github_observatory.gold.ecosystem_hourly\n            WHERE NOT in_outage\n            GROUP BY 1, 3)"
+        "\n            SELECT date_trunc('MONTH', event_hour) AS month,\n                   ROUND(SUM(push_events) / SUM(total_events), 4) AS push_share,\n                   CASE WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01'\n                        THEN 'full feed (thru May 2025)'\n                        ELSE 'filtered feed (Jun 2025 on, OQ-1)' END AS regime\n            FROM github_observatory.gold.ecosystem_hourly\n            WHERE (IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Raw (as collected)' OR NOT in_outage)\n            GROUP BY 1, 3"
+      ],
+      "parameters": [
+        {
+          "displayName": "standardize",
+          "keyword": "standardize",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "Standardized (comparable across eras)"
+                }
+              ]
+            }
+          }
+        }
       ]
     },
     {
       "name": "production_decade",
       "displayName": "production_decade",
       "queryLines": [
-        "SELECT 'Raw (as collected)' AS comparability, * FROM (\n            SELECT date_trunc('MONTH', event_hour) AS month,\n                   CAST(SUM(push_events) / COUNT(*) AS BIGINT) AS pushes_per_hour,\n                   CASE WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01'\n                        THEN 'full feed (thru May 2025)'\n                        ELSE 'filtered feed (Jun 2025 on, OQ-1)' END AS regime\n            FROM github_observatory.gold.ecosystem_hourly\n            WHERE TRUE\n            GROUP BY 1, 3)\nUNION ALL\nSELECT 'Standardized (comparable across eras)' AS comparability, * FROM (\n            SELECT date_trunc('MONTH', event_hour) AS month,\n                   CAST(SUM(push_events) / COUNT(*) AS BIGINT) AS pushes_per_hour,\n                   CASE WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01'\n                        THEN 'full feed (thru May 2025)'\n                        ELSE 'filtered feed (Jun 2025 on, OQ-1)' END AS regime\n            FROM github_observatory.gold.ecosystem_hourly\n            WHERE NOT in_outage\n            GROUP BY 1, 3)"
+        "\n            SELECT date_trunc('MONTH', event_hour) AS month,\n                   CAST(SUM(push_events) / COUNT(*) AS BIGINT) AS pushes_per_hour,\n                   CASE WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01'\n                        THEN 'full feed (thru May 2025)'\n                        ELSE 'filtered feed (Jun 2025 on, OQ-1)' END AS regime\n            FROM github_observatory.gold.ecosystem_hourly\n            WHERE (IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Raw (as collected)' OR NOT in_outage)\n            GROUP BY 1, 3"
+      ],
+      "parameters": [
+        {
+          "displayName": "standardize",
+          "keyword": "standardize",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "Standardized (comparable across eras)"
+                }
+              ]
+            }
+          }
+        }
       ]
     },
     {
       "name": "production_yoy",
       "displayName": "production_yoy",
       "queryLines": [
-        "SELECT 'Raw (as collected)' AS comparability, * FROM (\n            WITH m AS (\n                SELECT date_trunc('MONTH', event_hour) AS month,\n                       SUM(push_events) / COUNT(*) AS pushes_per_hour,\n                       COUNT(*) AS hours_observed\n                FROM github_observatory.gold.ecosystem_hourly\n                WHERE TRUE\n                GROUP BY 1\n            )\n            SELECT c.month,\n                   ROUND((c.pushes_per_hour - p.pushes_per_hour)\n                         / p.pushes_per_hour, 4) AS yoy_growth,\n                   CASE WHEN c.month < DATE'2025-06-01'\n                        THEN 'full feed (thru May 2025)'\n                        ELSE 'filtered feed (Jun 2025 on, OQ-1)' END AS regime\n            FROM m c\n            JOIN m p ON p.month = c.month - INTERVAL 12 MONTHS\n            WHERE NOT (c.month >= DATE'2025-06-01' AND p.month < DATE'2025-06-01')\n              -- partial months bias the comparison (day-of-week mix):\n              -- require near-full coverage on both sides\n              AND c.hours_observed >= 600 AND p.hours_observed >= 600)\nUNION ALL\nSELECT 'Standardized (comparable across eras)' AS comparability, * FROM (\n            WITH m AS (\n                SELECT date_trunc('MONTH', event_hour) AS month,\n                       SUM(push_events) / COUNT(*) AS pushes_per_hour,\n                       COUNT(*) AS hours_observed\n                FROM github_observatory.gold.ecosystem_hourly\n                WHERE NOT in_outage\n                GROUP BY 1\n            )\n            SELECT c.month,\n                   ROUND((c.pushes_per_hour - p.pushes_per_hour)\n                         / p.pushes_per_hour, 4) AS yoy_growth,\n                   CASE WHEN c.month < DATE'2025-06-01'\n                        THEN 'full feed (thru May 2025)'\n                        ELSE 'filtered feed (Jun 2025 on, OQ-1)' END AS regime\n            FROM m c\n            JOIN m p ON p.month = c.month - INTERVAL 12 MONTHS\n            WHERE NOT (c.month >= DATE'2025-06-01' AND p.month < DATE'2025-06-01')\n              -- partial months bias the comparison (day-of-week mix):\n              -- require near-full coverage on both sides\n              AND c.hours_observed >= 600 AND p.hours_observed >= 600)"
+        "\n            WITH m AS (\n                SELECT date_trunc('MONTH', event_hour) AS month,\n                       SUM(push_events) / COUNT(*) AS pushes_per_hour,\n                       COUNT(*) AS hours_observed\n                FROM github_observatory.gold.ecosystem_hourly\n                WHERE (IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Raw (as collected)' OR NOT in_outage)\n                GROUP BY 1\n            )\n            SELECT c.month,\n                   ROUND((c.pushes_per_hour - p.pushes_per_hour)\n                         / p.pushes_per_hour, 4) AS yoy_growth,\n                   CASE WHEN c.month < DATE'2025-06-01'\n                        THEN 'full feed (thru May 2025)'\n                        ELSE 'filtered feed (Jun 2025 on, OQ-1)' END AS regime\n            FROM m c\n            JOIN m p ON p.month = c.month - INTERVAL 12 MONTHS\n            WHERE NOT (c.month >= DATE'2025-06-01' AND p.month < DATE'2025-06-01')\n              -- partial months bias the comparison (day-of-week mix):\n              -- require near-full coverage on both sides\n              AND c.hours_observed >= 600 AND p.hours_observed >= 600"
+      ],
+      "parameters": [
+        {
+          "displayName": "standardize",
+          "keyword": "standardize",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "Standardized (comparable across eras)"
+                }
+              ]
+            }
+          }
+        }
       ]
     },
     {
       "name": "production_hourly_stream",
       "displayName": "production_hourly_stream",
       "queryLines": [
-        "SELECT 'Raw (as collected)' AS comparability, * FROM (\n            SELECT event_hour, production_events,\n                   pr_merged AS pr_merged,\n                   releases_published\n            FROM github_observatory.gold.ecosystem_hourly\n            WHERE source = 'stream' AND TRUE)\nUNION ALL\nSELECT 'Standardized (comparable across eras)' AS comparability, * FROM (\n            SELECT event_hour, production_events,\n                   CASE WHEN CAST(event_hour AS DATE) BETWEEN DATE'2025-10-09' AND DATE'2025-12-01' THEN CAST(NULL AS BIGINT) ELSE pr_merged END AS pr_merged,\n                   releases_published\n            FROM github_observatory.gold.ecosystem_hourly\n            WHERE source = 'stream' AND NOT in_outage)"
+        "\n            SELECT event_hour, production_events,\n                   CASE WHEN IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Standardized (comparable across eras)' THEN (CASE WHEN CAST(event_hour AS DATE) BETWEEN DATE'2025-10-09' AND DATE'2025-12-01' THEN CAST(NULL AS BIGINT) ELSE pr_merged END) ELSE pr_merged END AS pr_merged,\n                   releases_published\n            FROM github_observatory.gold.ecosystem_hourly\n            WHERE source = 'stream' AND (IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Raw (as collected)' OR NOT in_outage)"
+      ],
+      "parameters": [
+        {
+          "displayName": "standardize",
+          "keyword": "standardize",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "Standardized (comparable across eras)"
+                }
+              ]
+            }
+          }
+        }
       ]
     },
     {
       "name": "flow_decade",
       "displayName": "flow_decade",
       "queryLines": [
-        "SELECT 'Raw (as collected)' AS comparability, * FROM (\n            WITH daily AS (\n                SELECT CAST(event_hour AS DATE) AS day,\n                       COUNT(*) AS hrs,\n                       AVG(push_events) AS mean,\n                       STDDEV_POP(push_events) AS std,\n                       SUM(push_events) AS tot\n                FROM github_observatory.gold.ecosystem_hourly\n                WHERE TRUE\n                GROUP BY 1\n            ),\n            entropy AS (\n                SELECT CAST(e.event_hour AS DATE) AS day,\n                       -SUM(CASE WHEN e.push_events > 0 AND d.tot > 0\n                                 THEN (e.push_events / d.tot)\n                                      * ln(e.push_events / d.tot)\n                                 ELSE 0.0 END) AS ent\n                FROM github_observatory.gold.ecosystem_hourly e\n                JOIN daily d ON CAST(e.event_hour AS DATE) = d.day\n                GROUP BY 1\n            )\n            SELECT date_trunc('MONTH', d.day) AS month,\n                   ROUND(AVG(try_divide(d.std, d.mean)), 4) AS cv,\n                   ROUND(AVG(try_divide(d.std - d.mean, d.std + d.mean)), 4)\n                       AS burstiness,\n                   ROUND(AVG(e.ent), 4) AS entropy,\n                   CASE WHEN date_trunc('MONTH', d.day) < DATE'2025-06-01'\n                        THEN 'full feed (thru May 2025)'\n                        ELSE 'filtered feed (Jun 2025 on, OQ-1)' END AS regime\n            FROM daily d JOIN entropy e USING (day)\n            WHERE d.hrs = 24\n            GROUP BY 1, 5)\nUNION ALL\nSELECT 'Standardized (comparable across eras)' AS comparability, * FROM (\n            WITH daily AS (\n                SELECT CAST(event_hour AS DATE) AS day,\n                       COUNT(*) AS hrs,\n                       AVG(push_events) AS mean,\n                       STDDEV_POP(push_events) AS std,\n                       SUM(push_events) AS tot\n                FROM github_observatory.gold.ecosystem_hourly\n                WHERE NOT in_outage\n                GROUP BY 1\n            ),\n            entropy AS (\n                SELECT CAST(e.event_hour AS DATE) AS day,\n                       -SUM(CASE WHEN e.push_events > 0 AND d.tot > 0\n                                 THEN (e.push_events / d.tot)\n                                      * ln(e.push_events / d.tot)\n                                 ELSE 0.0 END) AS ent\n                FROM github_observatory.gold.ecosystem_hourly e\n                JOIN daily d ON CAST(e.event_hour AS DATE) = d.day\n                GROUP BY 1\n            )\n            SELECT date_trunc('MONTH', d.day) AS month,\n                   ROUND(AVG(try_divide(d.std, d.mean)), 4) AS cv,\n                   ROUND(AVG(try_divide(d.std - d.mean, d.std + d.mean)), 4)\n                       AS burstiness,\n                   ROUND(AVG(e.ent), 4) AS entropy,\n                   CASE WHEN date_trunc('MONTH', d.day) < DATE'2025-06-01'\n                        THEN 'full feed (thru May 2025)'\n                        ELSE 'filtered feed (Jun 2025 on, OQ-1)' END AS regime\n            FROM daily d JOIN entropy e USING (day)\n            WHERE d.hrs = 24\n            GROUP BY 1, 5)"
+        "\n            WITH daily AS (\n                SELECT CAST(event_hour AS DATE) AS day,\n                       COUNT(*) AS hrs,\n                       AVG(push_events) AS mean,\n                       STDDEV_POP(push_events) AS std,\n                       SUM(push_events) AS tot\n                FROM github_observatory.gold.ecosystem_hourly\n                WHERE (IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Raw (as collected)' OR NOT in_outage)\n                GROUP BY 1\n            ),\n            entropy AS (\n                SELECT CAST(e.event_hour AS DATE) AS day,\n                       -SUM(CASE WHEN e.push_events > 0 AND d.tot > 0\n                                 THEN (e.push_events / d.tot)\n                                      * ln(e.push_events / d.tot)\n                                 ELSE 0.0 END) AS ent\n                FROM github_observatory.gold.ecosystem_hourly e\n                JOIN daily d ON CAST(e.event_hour AS DATE) = d.day\n                GROUP BY 1\n            )\n            SELECT date_trunc('MONTH', d.day) AS month,\n                   ROUND(AVG(try_divide(d.std, d.mean)), 4) AS cv,\n                   ROUND(AVG(try_divide(d.std - d.mean, d.std + d.mean)), 4)\n                       AS burstiness,\n                   ROUND(AVG(e.ent), 4) AS entropy,\n                   CASE WHEN date_trunc('MONTH', d.day) < DATE'2025-06-01'\n                        THEN 'full feed (thru May 2025)'\n                        ELSE 'filtered feed (Jun 2025 on, OQ-1)' END AS regime\n            FROM daily d JOIN entropy e USING (day)\n            WHERE d.hrs = 24\n            GROUP BY 1, 5"
+      ],
+      "parameters": [
+        {
+          "displayName": "standardize",
+          "keyword": "standardize",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "Standardized (comparable across eras)"
+                }
+              ]
+            }
+          }
+        }
       ]
     },
     {
       "name": "rework_hourly",
       "displayName": "rework_hourly",
       "queryLines": [
-        "SELECT 'Raw (as collected)' AS comparability, * FROM (\n            SELECT event_hour, pr_reopened, issues_reopened,\n                   pr_closed_no_merge AS pr_closed_no_merge,\n                   pr_merged AS pr_merged\n            FROM github_observatory.gold.ecosystem_hourly\n            WHERE source = 'stream' AND TRUE)\nUNION ALL\nSELECT 'Standardized (comparable across eras)' AS comparability, * FROM (\n            SELECT event_hour, pr_reopened, issues_reopened,\n                   CASE WHEN CAST(event_hour AS DATE) BETWEEN DATE'2025-10-09' AND DATE'2025-12-01' THEN CAST(NULL AS BIGINT) ELSE pr_closed_no_merge END AS pr_closed_no_merge,\n                   CASE WHEN CAST(event_hour AS DATE) BETWEEN DATE'2025-10-09' AND DATE'2025-12-01' THEN CAST(NULL AS BIGINT) ELSE pr_merged END AS pr_merged\n            FROM github_observatory.gold.ecosystem_hourly\n            WHERE source = 'stream' AND NOT in_outage)"
+        "\n            SELECT event_hour, pr_reopened, issues_reopened,\n                   CASE WHEN IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Standardized (comparable across eras)' THEN (CASE WHEN CAST(event_hour AS DATE) BETWEEN DATE'2025-10-09' AND DATE'2025-12-01' THEN CAST(NULL AS BIGINT) ELSE pr_closed_no_merge END) ELSE pr_closed_no_merge END AS pr_closed_no_merge,\n                   CASE WHEN IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Standardized (comparable across eras)' THEN (CASE WHEN CAST(event_hour AS DATE) BETWEEN DATE'2025-10-09' AND DATE'2025-12-01' THEN CAST(NULL AS BIGINT) ELSE pr_merged END) ELSE pr_merged END AS pr_merged\n            FROM github_observatory.gold.ecosystem_hourly\n            WHERE source = 'stream' AND (IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Raw (as collected)' OR NOT in_outage)"
+      ],
+      "parameters": [
+        {
+          "displayName": "standardize",
+          "keyword": "standardize",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "Standardized (comparable across eras)"
+                }
+              ]
+            }
+          }
+        }
       ]
     },
     {
       "name": "review_hourly",
       "displayName": "review_hourly",
       "queryLines": [
-        "SELECT 'Raw (as collected)' AS comparability, * FROM (\n            SELECT date_trunc('HOUR', created_at) AS event_hour, review_state,\n                   COUNT(*) AS reviews\n            FROM github_observatory.silver.review_events\n            WHERE TRUE\n            GROUP BY 1, 2)\nUNION ALL\nSELECT 'Standardized (comparable across eras)' AS comparability, * FROM (\n            SELECT date_trunc('HOUR', created_at) AS event_hour, review_state,\n                   COUNT(*) AS reviews\n            FROM github_observatory.silver.review_events\n            WHERE NOT ((CAST(created_at AS DATE) BETWEEN DATE'2019-09-12' AND DATE'2019-09-12') OR (CAST(created_at AS DATE) BETWEEN DATE'2020-08-21' AND DATE'2020-08-23') OR (CAST(created_at AS DATE) BETWEEN DATE'2021-03-09' AND DATE'2021-03-10') OR (CAST(created_at AS DATE) BETWEEN DATE'2021-05-08' AND DATE'2021-05-11') OR (CAST(created_at AS DATE) BETWEEN DATE'2021-08-26' AND DATE'2021-08-27') OR (CAST(created_at AS DATE) BETWEEN DATE'2021-10-06' AND DATE'2021-10-29') OR (CAST(created_at AS DATE) BETWEEN DATE'2025-10-09' AND DATE'2025-10-14'))\n            GROUP BY 1, 2)"
+        "\n            SELECT date_trunc('HOUR', created_at) AS event_hour, review_state,\n                   COUNT(*) AS reviews\n            FROM github_observatory.silver.review_events\n            WHERE (IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Raw (as collected)' OR NOT ((CAST(created_at AS DATE) BETWEEN DATE'2019-09-12' AND DATE'2019-09-12') OR (CAST(created_at AS DATE) BETWEEN DATE'2020-08-21' AND DATE'2020-08-23') OR (CAST(created_at AS DATE) BETWEEN DATE'2021-03-09' AND DATE'2021-03-10') OR (CAST(created_at AS DATE) BETWEEN DATE'2021-05-08' AND DATE'2021-05-11') OR (CAST(created_at AS DATE) BETWEEN DATE'2021-08-26' AND DATE'2021-08-27') OR (CAST(created_at AS DATE) BETWEEN DATE'2021-10-06' AND DATE'2021-10-29') OR (CAST(created_at AS DATE) BETWEEN DATE'2025-10-09' AND DATE'2025-10-14')))\n            GROUP BY 1, 2"
+      ],
+      "parameters": [
+        {
+          "displayName": "standardize",
+          "keyword": "standardize",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "Standardized (comparable across eras)"
+                }
+              ]
+            }
+          }
+        }
       ]
     },
     {
       "name": "bot_share_decade",
       "displayName": "bot_share_decade",
       "queryLines": [
-        "SELECT 'Raw (as collected)' AS comparability, * FROM (\n            SELECT date_trunc('MONTH', event_hour) AS month,\n                   ROUND(SUM(bot_events) / SUM(total_events), 4) AS bot_share,\n                   CASE WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01'\n                        THEN 'full feed (thru May 2025)'\n                        ELSE 'filtered feed (Jun 2025 on, OQ-1)' END AS regime\n            FROM github_observatory.gold.ecosystem_hourly\n            WHERE TRUE\n            GROUP BY 1, 3)\nUNION ALL\nSELECT 'Standardized (comparable across eras)' AS comparability, * FROM (\n            SELECT date_trunc('MONTH', event_hour) AS month,\n                   ROUND(SUM(bot_events) / SUM(total_events), 4) AS bot_share,\n                   CASE WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01'\n                        THEN 'full feed (thru May 2025)'\n                        ELSE 'filtered feed (Jun 2025 on, OQ-1)' END AS regime\n            FROM github_observatory.gold.ecosystem_hourly\n            WHERE NOT in_outage\n            GROUP BY 1, 3)"
+        "\n            SELECT date_trunc('MONTH', event_hour) AS month,\n                   ROUND(SUM(bot_events) / SUM(total_events), 4) AS bot_share,\n                   CASE WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01'\n                        THEN 'full feed (thru May 2025)'\n                        ELSE 'filtered feed (Jun 2025 on, OQ-1)' END AS regime\n            FROM github_observatory.gold.ecosystem_hourly\n            WHERE (IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Raw (as collected)' OR NOT in_outage)\n            GROUP BY 1, 3"
+      ],
+      "parameters": [
+        {
+          "displayName": "standardize",
+          "keyword": "standardize",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "Standardized (comparable across eras)"
+                }
+              ]
+            }
+          }
+        }
       ]
     },
     {
       "name": "actors_decade",
       "displayName": "actors_decade",
       "queryLines": [
-        "SELECT 'Raw (as collected)' AS comparability, * FROM (\n            SELECT date_trunc('MONTH', event_hour) AS month,\n                   CAST(AVG(distinct_actors) AS BIGINT) AS avg_hourly_actors,\n                   CAST(AVG(distinct_actors_human) AS BIGINT)\n                       AS avg_hourly_actors_human,\n                   CASE WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01'\n                        THEN 'full feed (thru May 2025)'\n                        ELSE 'filtered feed (Jun 2025 on, OQ-1)' END AS regime\n            FROM github_observatory.gold.ecosystem_hourly\n            WHERE TRUE\n            GROUP BY 1, 4)\nUNION ALL\nSELECT 'Standardized (comparable across eras)' AS comparability, * FROM (\n            SELECT date_trunc('MONTH', event_hour) AS month,\n                   CAST(AVG(distinct_actors) AS BIGINT) AS avg_hourly_actors,\n                   CAST(AVG(distinct_actors_human) AS BIGINT)\n                       AS avg_hourly_actors_human,\n                   CASE WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01'\n                        THEN 'full feed (thru May 2025)'\n                        ELSE 'filtered feed (Jun 2025 on, OQ-1)' END AS regime\n            FROM github_observatory.gold.ecosystem_hourly\n            WHERE NOT in_outage\n            GROUP BY 1, 4)"
+        "\n            SELECT date_trunc('MONTH', event_hour) AS month,\n                   CAST(AVG(distinct_actors) AS BIGINT) AS avg_hourly_actors,\n                   CAST(AVG(distinct_actors_human) AS BIGINT)\n                       AS avg_hourly_actors_human,\n                   CASE WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01'\n                        THEN 'full feed (thru May 2025)'\n                        ELSE 'filtered feed (Jun 2025 on, OQ-1)' END AS regime\n            FROM github_observatory.gold.ecosystem_hourly\n            WHERE (IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Raw (as collected)' OR NOT in_outage)\n            GROUP BY 1, 4"
+      ],
+      "parameters": [
+        {
+          "displayName": "standardize",
+          "keyword": "standardize",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "Standardized (comparable across eras)"
+                }
+              ]
+            }
+          }
+        }
       ]
     },
     {
       "name": "contribution",
       "displayName": "contribution",
       "queryLines": [
-        "SELECT 'Raw (as collected)' AS comparability, * FROM (\n            SELECT event_date, new_actors,\n                   ROUND(top100_actor_share, 4) AS top100_actor_share,\n                   events_per_actor_p50, events_per_actor_p90, events_per_actor_p99\n            FROM github_observatory.gold.contribution_daily\n            WHERE TRUE)\nUNION ALL\nSELECT 'Standardized (comparable across eras)' AS comparability, * FROM (\n            SELECT event_date, new_actors,\n                   ROUND(top100_actor_share, 4) AS top100_actor_share,\n                   events_per_actor_p50, events_per_actor_p90, events_per_actor_p99\n            FROM github_observatory.gold.contribution_daily\n            WHERE NOT ((CAST(event_date AS DATE) BETWEEN DATE'2019-09-12' AND DATE'2019-09-12') OR (CAST(event_date AS DATE) BETWEEN DATE'2020-08-21' AND DATE'2020-08-23') OR (CAST(event_date AS DATE) BETWEEN DATE'2021-03-09' AND DATE'2021-03-10') OR (CAST(event_date AS DATE) BETWEEN DATE'2021-05-08' AND DATE'2021-05-11') OR (CAST(event_date AS DATE) BETWEEN DATE'2021-08-26' AND DATE'2021-08-27') OR (CAST(event_date AS DATE) BETWEEN DATE'2021-10-06' AND DATE'2021-10-29') OR (CAST(event_date AS DATE) BETWEEN DATE'2025-10-09' AND DATE'2025-10-14')))"
+        "\n            SELECT event_date, new_actors,\n                   ROUND(top100_actor_share, 4) AS top100_actor_share,\n                   events_per_actor_p50, events_per_actor_p90, events_per_actor_p99\n            FROM github_observatory.gold.contribution_daily\n            WHERE (IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Raw (as collected)' OR NOT ((CAST(event_date AS DATE) BETWEEN DATE'2019-09-12' AND DATE'2019-09-12') OR (CAST(event_date AS DATE) BETWEEN DATE'2020-08-21' AND DATE'2020-08-23') OR (CAST(event_date AS DATE) BETWEEN DATE'2021-03-09' AND DATE'2021-03-10') OR (CAST(event_date AS DATE) BETWEEN DATE'2021-05-08' AND DATE'2021-05-11') OR (CAST(event_date AS DATE) BETWEEN DATE'2021-08-26' AND DATE'2021-08-27') OR (CAST(event_date AS DATE) BETWEEN DATE'2021-10-06' AND DATE'2021-10-29') OR (CAST(event_date AS DATE) BETWEEN DATE'2025-10-09' AND DATE'2025-10-14')))"
+      ],
+      "parameters": [
+        {
+          "displayName": "standardize",
+          "keyword": "standardize",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "Standardized (comparable across eras)"
+                }
+              ]
+            }
+          }
+        }
       ]
     },
     {
       "name": "engagement_hourly",
       "displayName": "engagement_hourly",
       "queryLines": [
-        "SELECT 'Raw (as collected)' AS comparability, * FROM (\n            SELECT date_trunc('HOUR', created_at) AS event_hour,\n                   COUNT_IF(event_type = 'WatchEvent') AS stars,\n                   COUNT_IF(event_type = 'ForkEvent') AS forks\n            FROM github_observatory.silver.events\n            WHERE quality_flag IS NULL AND created_at IS NOT NULL\n              AND event_type IN ('WatchEvent', 'ForkEvent')\n              AND TRUE\n            GROUP BY 1)\nUNION ALL\nSELECT 'Standardized (comparable across eras)' AS comparability, * FROM (\n            SELECT date_trunc('HOUR', created_at) AS event_hour,\n                   COUNT_IF(event_type = 'WatchEvent') AS stars,\n                   COUNT_IF(event_type = 'ForkEvent') AS forks\n            FROM github_observatory.silver.events\n            WHERE quality_flag IS NULL AND created_at IS NOT NULL\n              AND event_type IN ('WatchEvent', 'ForkEvent')\n              AND NOT ((CAST(created_at AS DATE) BETWEEN DATE'2019-09-12' AND DATE'2019-09-12') OR (CAST(created_at AS DATE) BETWEEN DATE'2020-08-21' AND DATE'2020-08-23') OR (CAST(created_at AS DATE) BETWEEN DATE'2021-03-09' AND DATE'2021-03-10') OR (CAST(created_at AS DATE) BETWEEN DATE'2021-05-08' AND DATE'2021-05-11') OR (CAST(created_at AS DATE) BETWEEN DATE'2021-08-26' AND DATE'2021-08-27') OR (CAST(created_at AS DATE) BETWEEN DATE'2021-10-06' AND DATE'2021-10-29') OR (CAST(created_at AS DATE) BETWEEN DATE'2025-10-09' AND DATE'2025-10-14'))\n            GROUP BY 1)"
+        "\n            SELECT date_trunc('HOUR', created_at) AS event_hour,\n                   COUNT_IF(event_type = 'WatchEvent') AS stars,\n                   COUNT_IF(event_type = 'ForkEvent') AS forks\n            FROM github_observatory.silver.events\n            WHERE quality_flag IS NULL AND created_at IS NOT NULL\n              AND event_type IN ('WatchEvent', 'ForkEvent')\n              AND (IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Raw (as collected)' OR NOT ((CAST(created_at AS DATE) BETWEEN DATE'2019-09-12' AND DATE'2019-09-12') OR (CAST(created_at AS DATE) BETWEEN DATE'2020-08-21' AND DATE'2020-08-23') OR (CAST(created_at AS DATE) BETWEEN DATE'2021-03-09' AND DATE'2021-03-10') OR (CAST(created_at AS DATE) BETWEEN DATE'2021-05-08' AND DATE'2021-05-11') OR (CAST(created_at AS DATE) BETWEEN DATE'2021-08-26' AND DATE'2021-08-27') OR (CAST(created_at AS DATE) BETWEEN DATE'2021-10-06' AND DATE'2021-10-29') OR (CAST(created_at AS DATE) BETWEEN DATE'2025-10-09' AND DATE'2025-10-14')))\n            GROUP BY 1"
+      ],
+      "parameters": [
+        {
+          "displayName": "standardize",
+          "keyword": "standardize",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "Standardized (comparable across eras)"
+                }
+              ]
+            }
+          }
+        }
       ]
     },
     {
       "name": "retention",
       "displayName": "retention",
       "queryLines": [
-        "SELECT 'Raw (as collected)' AS comparability, * FROM (\n            SELECT event_date, active_actors, active_actors_human,\n                   ROUND(retention_1d, 4) AS retention_1d,\n                   ROUND(retention_7d, 4) AS retention_7d\n            FROM github_observatory.gold.actor_retention_daily\n            WHERE TRUE)\nUNION ALL\nSELECT 'Standardized (comparable across eras)' AS comparability, * FROM (\n            SELECT event_date, active_actors, active_actors_human,\n                   ROUND(retention_1d, 4) AS retention_1d,\n                   ROUND(retention_7d, 4) AS retention_7d\n            FROM github_observatory.gold.actor_retention_daily\n            WHERE NOT ((CAST(event_date AS DATE) BETWEEN DATE'2019-09-12' AND DATE'2019-09-12') OR (CAST(event_date AS DATE) BETWEEN DATE'2020-08-21' AND DATE'2020-08-23') OR (CAST(event_date AS DATE) BETWEEN DATE'2021-03-09' AND DATE'2021-03-10') OR (CAST(event_date AS DATE) BETWEEN DATE'2021-05-08' AND DATE'2021-05-11') OR (CAST(event_date AS DATE) BETWEEN DATE'2021-08-26' AND DATE'2021-08-27') OR (CAST(event_date AS DATE) BETWEEN DATE'2021-10-06' AND DATE'2021-10-29') OR (CAST(event_date AS DATE) BETWEEN DATE'2025-10-09' AND DATE'2025-10-14')))"
+        "\n            SELECT event_date, active_actors, active_actors_human,\n                   ROUND(retention_1d, 4) AS retention_1d,\n                   ROUND(retention_7d, 4) AS retention_7d\n            FROM github_observatory.gold.actor_retention_daily\n            WHERE (IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Raw (as collected)' OR NOT ((CAST(event_date AS DATE) BETWEEN DATE'2019-09-12' AND DATE'2019-09-12') OR (CAST(event_date AS DATE) BETWEEN DATE'2020-08-21' AND DATE'2020-08-23') OR (CAST(event_date AS DATE) BETWEEN DATE'2021-03-09' AND DATE'2021-03-10') OR (CAST(event_date AS DATE) BETWEEN DATE'2021-05-08' AND DATE'2021-05-11') OR (CAST(event_date AS DATE) BETWEEN DATE'2021-08-26' AND DATE'2021-08-27') OR (CAST(event_date AS DATE) BETWEEN DATE'2021-10-06' AND DATE'2021-10-29') OR (CAST(event_date AS DATE) BETWEEN DATE'2025-10-09' AND DATE'2025-10-14')))"
+      ],
+      "parameters": [
+        {
+          "displayName": "standardize",
+          "keyword": "standardize",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "Standardized (comparable across eras)"
+                }
+              ]
+            }
+          }
+        }
       ]
     },
     {
       "name": "network",
       "displayName": "network",
       "queryLines": [
-        "SELECT 'Raw (as collected)' AS comparability, * FROM (\n            SELECT event_date,\n                   ROUND(multi_repo_actor_share, 4) AS multi_repo_actor_share,\n                   ROUND(single_actor_repo_share, 4) AS single_actor_repo_share\n            FROM github_observatory.gold.network_daily\n            WHERE TRUE)\nUNION ALL\nSELECT 'Standardized (comparable across eras)' AS comparability, * FROM (\n            SELECT event_date,\n                   ROUND(multi_repo_actor_share, 4) AS multi_repo_actor_share,\n                   ROUND(single_actor_repo_share, 4) AS single_actor_repo_share\n            FROM github_observatory.gold.network_daily\n            WHERE NOT ((CAST(event_date AS DATE) BETWEEN DATE'2019-09-12' AND DATE'2019-09-12') OR (CAST(event_date AS DATE) BETWEEN DATE'2020-08-21' AND DATE'2020-08-23') OR (CAST(event_date AS DATE) BETWEEN DATE'2021-03-09' AND DATE'2021-03-10') OR (CAST(event_date AS DATE) BETWEEN DATE'2021-05-08' AND DATE'2021-05-11') OR (CAST(event_date AS DATE) BETWEEN DATE'2021-08-26' AND DATE'2021-08-27') OR (CAST(event_date AS DATE) BETWEEN DATE'2021-10-06' AND DATE'2021-10-29') OR (CAST(event_date AS DATE) BETWEEN DATE'2025-10-09' AND DATE'2025-10-14')))"
+        "\n            SELECT event_date,\n                   ROUND(multi_repo_actor_share, 4) AS multi_repo_actor_share,\n                   ROUND(single_actor_repo_share, 4) AS single_actor_repo_share\n            FROM github_observatory.gold.network_daily\n            WHERE (IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Raw (as collected)' OR NOT ((CAST(event_date AS DATE) BETWEEN DATE'2019-09-12' AND DATE'2019-09-12') OR (CAST(event_date AS DATE) BETWEEN DATE'2020-08-21' AND DATE'2020-08-23') OR (CAST(event_date AS DATE) BETWEEN DATE'2021-03-09' AND DATE'2021-03-10') OR (CAST(event_date AS DATE) BETWEEN DATE'2021-05-08' AND DATE'2021-05-11') OR (CAST(event_date AS DATE) BETWEEN DATE'2021-08-26' AND DATE'2021-08-27') OR (CAST(event_date AS DATE) BETWEEN DATE'2021-10-06' AND DATE'2021-10-29') OR (CAST(event_date AS DATE) BETWEEN DATE'2025-10-09' AND DATE'2025-10-14')))"
+      ],
+      "parameters": [
+        {
+          "displayName": "standardize",
+          "keyword": "standardize",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "Standardized (comparable across eras)"
+                }
+              ]
+            }
+          }
+        }
       ]
     },
     {
@@ -109,7 +354,24 @@
       "name": "forecast_fit",
       "displayName": "forecast_fit",
       "queryLines": [
-        "SELECT 'Raw (as collected)' AS comparability, * FROM (\n            SELECT event_hour, actual, prediction\n            FROM github_observatory.gold.forecast_predictions\n            WHERE target = 'total_events' AND method = 'seasonal_24h'\n              AND event_hour >= current_timestamp() - INTERVAL 30 DAYS\n              AND TRUE)\nUNION ALL\nSELECT 'Standardized (comparable across eras)' AS comparability, * FROM (\n            SELECT event_hour, actual, prediction\n            FROM github_observatory.gold.forecast_predictions\n            WHERE target = 'total_events' AND method = 'seasonal_24h'\n              AND event_hour >= current_timestamp() - INTERVAL 30 DAYS\n              AND NOT ((CAST(event_hour AS DATE) BETWEEN DATE'2019-09-12' AND DATE'2019-09-12') OR (CAST(event_hour AS DATE) BETWEEN DATE'2020-08-21' AND DATE'2020-08-23') OR (CAST(event_hour AS DATE) BETWEEN DATE'2021-03-09' AND DATE'2021-03-10') OR (CAST(event_hour AS DATE) BETWEEN DATE'2021-05-08' AND DATE'2021-05-11') OR (CAST(event_hour AS DATE) BETWEEN DATE'2021-08-26' AND DATE'2021-08-27') OR (CAST(event_hour AS DATE) BETWEEN DATE'2021-10-06' AND DATE'2021-10-29') OR (CAST(event_hour AS DATE) BETWEEN DATE'2025-10-09' AND DATE'2025-10-14')))"
+        "\n            SELECT event_hour, actual, prediction\n            FROM github_observatory.gold.forecast_predictions\n            WHERE target = 'total_events' AND method = 'seasonal_24h'\n              AND event_hour >= current_timestamp() - INTERVAL 30 DAYS\n              AND (IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Raw (as collected)' OR NOT ((CAST(event_hour AS DATE) BETWEEN DATE'2019-09-12' AND DATE'2019-09-12') OR (CAST(event_hour AS DATE) BETWEEN DATE'2020-08-21' AND DATE'2020-08-23') OR (CAST(event_hour AS DATE) BETWEEN DATE'2021-03-09' AND DATE'2021-03-10') OR (CAST(event_hour AS DATE) BETWEEN DATE'2021-05-08' AND DATE'2021-05-11') OR (CAST(event_hour AS DATE) BETWEEN DATE'2021-08-26' AND DATE'2021-08-27') OR (CAST(event_hour AS DATE) BETWEEN DATE'2021-10-06' AND DATE'2021-10-29') OR (CAST(event_hour AS DATE) BETWEEN DATE'2025-10-09' AND DATE'2025-10-14')))"
+      ],
+      "parameters": [
+        {
+          "displayName": "standardize",
+          "keyword": "standardize",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "Standardized (comparable across eras)"
+                }
+              ]
+            }
+          }
+        }
       ]
     }
   ],
@@ -200,26 +462,39 @@
             "name": "std_provenance",
             "queries": [
               {
-                "name": "f_0",
+                "name": "options",
                 "query": {
-                  "datasetName": "coverage_monthly",
+                  "datasetName": "comparability_modes",
                   "fields": [
                     {
-                      "name": "comparability",
-                      "expression": "`comparability`"
+                      "name": "mode",
+                      "expression": "`mode`"
                     }
                   ],
                   "disaggregated": false
                 }
               },
               {
-                "name": "f_1",
+                "name": "param_0",
+                "query": {
+                  "datasetName": "coverage_monthly",
+                  "parameters": [
+                    {
+                      "name": "standardize",
+                      "keyword": "standardize"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "param_1",
                 "query": {
                   "datasetName": "regime_monthly",
-                  "fields": [
+                  "parameters": [
                     {
-                      "name": "comparability",
-                      "expression": "`comparability`"
+                      "name": "standardize",
+                      "keyword": "standardize"
                     }
                   ],
                   "disaggregated": false
@@ -236,14 +511,17 @@
               "encodings": {
                 "fields": [
                   {
-                    "fieldName": "comparability",
-                    "displayName": "comparability",
-                    "queryName": "f_0"
+                    "fieldName": "mode",
+                    "displayName": "mode",
+                    "queryName": "options"
                   },
                   {
-                    "fieldName": "comparability",
-                    "displayName": "comparability",
-                    "queryName": "f_1"
+                    "parameterName": "standardize",
+                    "queryName": "param_0"
+                  },
+                  {
+                    "parameterName": "standardize",
+                    "queryName": "param_1"
                   }
                 ]
               },
@@ -344,39 +622,52 @@
             "name": "std_production",
             "queries": [
               {
-                "name": "f_0",
+                "name": "options",
+                "query": {
+                  "datasetName": "comparability_modes",
+                  "fields": [
+                    {
+                      "name": "mode",
+                      "expression": "`mode`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "param_0",
                 "query": {
                   "datasetName": "production_decade",
-                  "fields": [
+                  "parameters": [
                     {
-                      "name": "comparability",
-                      "expression": "`comparability`"
+                      "name": "standardize",
+                      "keyword": "standardize"
                     }
                   ],
                   "disaggregated": false
                 }
               },
               {
-                "name": "f_1",
+                "name": "param_1",
                 "query": {
                   "datasetName": "production_yoy",
-                  "fields": [
+                  "parameters": [
                     {
-                      "name": "comparability",
-                      "expression": "`comparability`"
+                      "name": "standardize",
+                      "keyword": "standardize"
                     }
                   ],
                   "disaggregated": false
                 }
               },
               {
-                "name": "f_2",
+                "name": "param_2",
                 "query": {
                   "datasetName": "production_hourly_stream",
-                  "fields": [
+                  "parameters": [
                     {
-                      "name": "comparability",
-                      "expression": "`comparability`"
+                      "name": "standardize",
+                      "keyword": "standardize"
                     }
                   ],
                   "disaggregated": false
@@ -393,19 +684,21 @@
               "encodings": {
                 "fields": [
                   {
-                    "fieldName": "comparability",
-                    "displayName": "comparability",
-                    "queryName": "f_0"
+                    "fieldName": "mode",
+                    "displayName": "mode",
+                    "queryName": "options"
                   },
                   {
-                    "fieldName": "comparability",
-                    "displayName": "comparability",
-                    "queryName": "f_1"
+                    "parameterName": "standardize",
+                    "queryName": "param_0"
                   },
                   {
-                    "fieldName": "comparability",
-                    "displayName": "comparability",
-                    "queryName": "f_2"
+                    "parameterName": "standardize",
+                    "queryName": "param_1"
+                  },
+                  {
+                    "parameterName": "standardize",
+                    "queryName": "param_2"
                   }
                 ]
               },
@@ -703,13 +996,26 @@
             "name": "std_flow",
             "queries": [
               {
-                "name": "f_0",
+                "name": "options",
                 "query": {
-                  "datasetName": "flow_decade",
+                  "datasetName": "comparability_modes",
                   "fields": [
                     {
-                      "name": "comparability",
-                      "expression": "`comparability`"
+                      "name": "mode",
+                      "expression": "`mode`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "param_0",
+                "query": {
+                  "datasetName": "flow_decade",
+                  "parameters": [
+                    {
+                      "name": "standardize",
+                      "keyword": "standardize"
                     }
                   ],
                   "disaggregated": false
@@ -726,9 +1032,13 @@
               "encodings": {
                 "fields": [
                   {
-                    "fieldName": "comparability",
-                    "displayName": "comparability",
-                    "queryName": "f_0"
+                    "fieldName": "mode",
+                    "displayName": "mode",
+                    "queryName": "options"
+                  },
+                  {
+                    "parameterName": "standardize",
+                    "queryName": "param_0"
                   }
                 ]
               },
@@ -971,26 +1281,39 @@
             "name": "std_rework",
             "queries": [
               {
-                "name": "f_0",
+                "name": "options",
                 "query": {
-                  "datasetName": "rework_hourly",
+                  "datasetName": "comparability_modes",
                   "fields": [
                     {
-                      "name": "comparability",
-                      "expression": "`comparability`"
+                      "name": "mode",
+                      "expression": "`mode`"
                     }
                   ],
                   "disaggregated": false
                 }
               },
               {
-                "name": "f_1",
+                "name": "param_0",
+                "query": {
+                  "datasetName": "rework_hourly",
+                  "parameters": [
+                    {
+                      "name": "standardize",
+                      "keyword": "standardize"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "param_1",
                 "query": {
                   "datasetName": "review_hourly",
-                  "fields": [
+                  "parameters": [
                     {
-                      "name": "comparability",
-                      "expression": "`comparability`"
+                      "name": "standardize",
+                      "keyword": "standardize"
                     }
                   ],
                   "disaggregated": false
@@ -1007,14 +1330,17 @@
               "encodings": {
                 "fields": [
                   {
-                    "fieldName": "comparability",
-                    "displayName": "comparability",
-                    "queryName": "f_0"
+                    "fieldName": "mode",
+                    "displayName": "mode",
+                    "queryName": "options"
                   },
                   {
-                    "fieldName": "comparability",
-                    "displayName": "comparability",
-                    "queryName": "f_1"
+                    "parameterName": "standardize",
+                    "queryName": "param_0"
+                  },
+                  {
+                    "parameterName": "standardize",
+                    "queryName": "param_1"
                   }
                 ]
               },
@@ -1243,39 +1569,52 @@
             "name": "std_contribution",
             "queries": [
               {
-                "name": "f_0",
+                "name": "options",
+                "query": {
+                  "datasetName": "comparability_modes",
+                  "fields": [
+                    {
+                      "name": "mode",
+                      "expression": "`mode`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "param_0",
                 "query": {
                   "datasetName": "bot_share_decade",
-                  "fields": [
+                  "parameters": [
                     {
-                      "name": "comparability",
-                      "expression": "`comparability`"
+                      "name": "standardize",
+                      "keyword": "standardize"
                     }
                   ],
                   "disaggregated": false
                 }
               },
               {
-                "name": "f_1",
+                "name": "param_1",
                 "query": {
                   "datasetName": "actors_decade",
-                  "fields": [
+                  "parameters": [
                     {
-                      "name": "comparability",
-                      "expression": "`comparability`"
+                      "name": "standardize",
+                      "keyword": "standardize"
                     }
                   ],
                   "disaggregated": false
                 }
               },
               {
-                "name": "f_2",
+                "name": "param_2",
                 "query": {
                   "datasetName": "contribution",
-                  "fields": [
+                  "parameters": [
                     {
-                      "name": "comparability",
-                      "expression": "`comparability`"
+                      "name": "standardize",
+                      "keyword": "standardize"
                     }
                   ],
                   "disaggregated": false
@@ -1292,19 +1631,21 @@
               "encodings": {
                 "fields": [
                   {
-                    "fieldName": "comparability",
-                    "displayName": "comparability",
-                    "queryName": "f_0"
+                    "fieldName": "mode",
+                    "displayName": "mode",
+                    "queryName": "options"
                   },
                   {
-                    "fieldName": "comparability",
-                    "displayName": "comparability",
-                    "queryName": "f_1"
+                    "parameterName": "standardize",
+                    "queryName": "param_0"
                   },
                   {
-                    "fieldName": "comparability",
-                    "displayName": "comparability",
-                    "queryName": "f_2"
+                    "parameterName": "standardize",
+                    "queryName": "param_1"
+                  },
+                  {
+                    "parameterName": "standardize",
+                    "queryName": "param_2"
                   }
                 ]
               },
@@ -1606,13 +1947,26 @@
             "name": "std_engagement",
             "queries": [
               {
-                "name": "f_0",
+                "name": "options",
                 "query": {
-                  "datasetName": "engagement_hourly",
+                  "datasetName": "comparability_modes",
                   "fields": [
                     {
-                      "name": "comparability",
-                      "expression": "`comparability`"
+                      "name": "mode",
+                      "expression": "`mode`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "param_0",
+                "query": {
+                  "datasetName": "engagement_hourly",
+                  "parameters": [
+                    {
+                      "name": "standardize",
+                      "keyword": "standardize"
                     }
                   ],
                   "disaggregated": false
@@ -1629,9 +1983,13 @@
               "encodings": {
                 "fields": [
                   {
-                    "fieldName": "comparability",
-                    "displayName": "comparability",
-                    "queryName": "f_0"
+                    "fieldName": "mode",
+                    "displayName": "mode",
+                    "queryName": "options"
+                  },
+                  {
+                    "parameterName": "standardize",
+                    "queryName": "param_0"
                   }
                 ]
               },
@@ -1787,26 +2145,39 @@
             "name": "std_sustain",
             "queries": [
               {
-                "name": "f_0",
+                "name": "options",
                 "query": {
-                  "datasetName": "retention",
+                  "datasetName": "comparability_modes",
                   "fields": [
                     {
-                      "name": "comparability",
-                      "expression": "`comparability`"
+                      "name": "mode",
+                      "expression": "`mode`"
                     }
                   ],
                   "disaggregated": false
                 }
               },
               {
-                "name": "f_1",
+                "name": "param_0",
+                "query": {
+                  "datasetName": "retention",
+                  "parameters": [
+                    {
+                      "name": "standardize",
+                      "keyword": "standardize"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "param_1",
                 "query": {
                   "datasetName": "network",
-                  "fields": [
+                  "parameters": [
                     {
-                      "name": "comparability",
-                      "expression": "`comparability`"
+                      "name": "standardize",
+                      "keyword": "standardize"
                     }
                   ],
                   "disaggregated": false
@@ -1823,14 +2194,17 @@
               "encodings": {
                 "fields": [
                   {
-                    "fieldName": "comparability",
-                    "displayName": "comparability",
-                    "queryName": "f_0"
+                    "fieldName": "mode",
+                    "displayName": "mode",
+                    "queryName": "options"
                   },
                   {
-                    "fieldName": "comparability",
-                    "displayName": "comparability",
-                    "queryName": "f_1"
+                    "parameterName": "standardize",
+                    "queryName": "param_0"
+                  },
+                  {
+                    "parameterName": "standardize",
+                    "queryName": "param_1"
                   }
                 ]
               },
@@ -1994,13 +2368,26 @@
             "name": "std_forecast",
             "queries": [
               {
-                "name": "f_0",
+                "name": "options",
                 "query": {
-                  "datasetName": "forecast_fit",
+                  "datasetName": "comparability_modes",
                   "fields": [
                     {
-                      "name": "comparability",
-                      "expression": "`comparability`"
+                      "name": "mode",
+                      "expression": "`mode`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "param_0",
+                "query": {
+                  "datasetName": "forecast_fit",
+                  "parameters": [
+                    {
+                      "name": "standardize",
+                      "keyword": "standardize"
                     }
                   ],
                   "disaggregated": false
@@ -2017,9 +2404,13 @@
               "encodings": {
                 "fields": [
                   {
-                    "fieldName": "comparability",
-                    "displayName": "comparability",
-                    "queryName": "f_0"
+                    "fieldName": "mode",
+                    "displayName": "mode",
+                    "queryName": "options"
+                  },
+                  {
+                    "parameterName": "standardize",
+                    "queryName": "param_0"
                   }
                 ]
               },
