@@ -287,7 +287,9 @@ OBSERVATORY = {
                    CASE WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01'
                         THEN 'full feed (thru May 2025)'
                         ELSE 'filtered feed (Jun 2025 on, OQ-1)' END AS regime
-            FROM {G}.ecosystem_hourly GROUP BY 1, 3"""),
+            FROM {G}.ecosystem_hourly
+            WHERE {STD_OUTAGE_WHERE}
+            GROUP BY 1, 3""", standardizable=True),
         # ---- production ----------------------------------------------------
         dataset("production_decade", f"""
             SELECT date_trunc('MONTH', event_hour) AS month,
@@ -368,10 +370,12 @@ OBSERVATORY = {
             FROM {G}.ecosystem_hourly
             WHERE source = 'stream' AND {STD_OUTAGE_WHERE}""",
                 standardizable=True),
-        dataset("review_hourly", """
+        dataset("review_hourly", f"""
             SELECT date_trunc('HOUR', created_at) AS event_hour, review_state,
                    COUNT(*) AS reviews
-            FROM github_observatory.silver.review_events GROUP BY 1, 2"""),
+            FROM github_observatory.silver.review_events
+            WHERE {std_outage_where('created_at')}
+            GROUP BY 1, 2""", standardizable=True),
         # ---- contribution --------------------------------------------------
         dataset("bot_share_decade", f"""
             SELECT date_trunc('MONTH', event_hour) AS month,
@@ -397,27 +401,31 @@ OBSERVATORY = {
             SELECT event_date, new_actors,
                    ROUND(top100_actor_share, 4) AS top100_actor_share,
                    events_per_actor_p50, events_per_actor_p90, events_per_actor_p99
-            FROM {G}.contribution_daily"""),
+            FROM {G}.contribution_daily
+            WHERE {std_outage_where('event_date')}""", standardizable=True),
         # ---- engagement (stream-only, hourly) ------------------------------
-        dataset("engagement_hourly", """
+        dataset("engagement_hourly", f"""
             SELECT date_trunc('HOUR', created_at) AS event_hour,
                    COUNT_IF(event_type = 'WatchEvent') AS stars,
                    COUNT_IF(event_type = 'ForkEvent') AS forks
             FROM github_observatory.silver.events
             WHERE quality_flag IS NULL AND created_at IS NOT NULL
               AND event_type IN ('WatchEvent', 'ForkEvent')
-            GROUP BY 1"""),
+              AND {std_outage_where('created_at')}
+            GROUP BY 1""", standardizable=True),
         # ---- sustainability & network --------------------------------------
         dataset("retention", f"""
             SELECT event_date, active_actors, active_actors_human,
                    ROUND(retention_1d, 4) AS retention_1d,
                    ROUND(retention_7d, 4) AS retention_7d
-            FROM {G}.actor_retention_daily"""),
+            FROM {G}.actor_retention_daily
+            WHERE {std_outage_where('event_date')}""", standardizable=True),
         dataset("network", f"""
             SELECT event_date,
                    ROUND(multi_repo_actor_share, 4) AS multi_repo_actor_share,
                    ROUND(single_actor_repo_share, 4) AS single_actor_repo_share
-            FROM {G}.network_daily"""),
+            FROM {G}.network_daily
+            WHERE {std_outage_where('event_date')}""", standardizable=True),
         # ---- forecasting ---------------------------------------------------
         dataset("forecast_eval", f"""
             SELECT target, method, n_predictions, ROUND(mae, 1) AS mae,
@@ -427,7 +435,8 @@ OBSERVATORY = {
             SELECT event_hour, actual, prediction
             FROM {G}.forecast_predictions
             WHERE target = 'total_events' AND method = 'seasonal_24h'
-              AND event_hour >= current_timestamp() - INTERVAL 30 DAYS"""),
+              AND event_hour >= current_timestamp() - INTERVAL 30 DAYS
+              AND {std_outage_where('event_hour')}""", standardizable=True),
     ],
     "pages": [
         {
@@ -441,7 +450,8 @@ OBSERVATORY = {
                        (0, 8, 3, 7),
                        fields=[field("month"), field("push_share"), field("regime")]),
                 filter_widget("std_provenance", STANDARDIZE_LABEL,
-                              ["coverage_monthly"], (0, 15, 3, 2)),
+                              ["coverage_monthly", "regime_monthly"],
+                              (0, 15, 3, 2)),
                 widget("coverage", "coverage_monthly", "bar",
                        "Hours observed per month, by source (gaps = archive outages)",
                        line_enc("month", "hours_observed", color="source"),
@@ -509,7 +519,7 @@ OBSERVATORY = {
             "displayName": "Rework",
             "layout": [
                 filter_widget("std_rework", STANDARDIZE_LABEL,
-                              ["rework_hourly"], (0, 0, 3, 2)),
+                              ["rework_hourly", "review_hourly"], (0, 0, 3, 2)),
                 text_widget("rework_note", PAGE_NOTES["rework"], (0, 0, 6, 2)),
                 widget("reopens_hourly", "rework_hourly", "line",
                        "Reopened PRs and issues per hour",
@@ -536,7 +546,8 @@ OBSERVATORY = {
             "displayName": "Contribution",
             "layout": [
                 filter_widget("std_contribution", STANDARDIZE_LABEL,
-                              ["bot_share_decade", "actors_decade"], (0, 0, 3, 2)),
+                              ["bot_share_decade", "actors_decade",
+                               "contribution"], (0, 0, 3, 2)),
                 text_widget("std_contribution_note", STANDARDIZE_NOTE, (3, 0, 3, 2)),
                 widget("bot_curve", "bot_share_decade", "line",
                        "Bot share of all events — the automation curve, 2016-present",
@@ -566,6 +577,8 @@ OBSERVATORY = {
             "name": "engagement",
             "displayName": "Engagement (coverage-caveated)",
             "layout": [
+                filter_widget("std_engagement", STANDARDIZE_LABEL,
+                              ["engagement_hourly"], (0, 0, 3, 2)),
                 text_widget("engage_note", PAGE_NOTES["engagement"], (0, 0, 6, 2)),
                 widget("stars_hourly", "engagement_hourly", "line",
                        "Stars per hour (stream-observed, NOT census)",
@@ -583,6 +596,8 @@ OBSERVATORY = {
             "name": "sustainability",
             "displayName": "Sustainability & Network",
             "layout": [
+                filter_widget("std_sustain", STANDARDIZE_LABEL,
+                              ["retention", "network"], (0, 0, 3, 2)),
                 text_widget("sustain_note", PAGE_NOTES["sustainability"], (0, 0, 6, 2)),
                 widget("retention_trend", "retention", "line",
                        "Actor retention: 1-day and 7-day (stream era)",
@@ -602,6 +617,8 @@ OBSERVATORY = {
             "name": "forecast",
             "displayName": "Forecast",
             "layout": [
+                filter_widget("std_forecast", STANDARDIZE_LABEL,
+                              ["forecast_fit"], (0, 0, 3, 2)),
                 widget("forecast_table", "forecast_eval", "table",
                        "Method leaderboard (MASE < 1 beats naive)",
                        table_enc(["target", "method", "n_predictions", "mae",
