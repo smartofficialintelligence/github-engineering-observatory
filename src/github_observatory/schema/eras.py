@@ -46,6 +46,26 @@ import datetime as dt
 from dataclasses import dataclass, field
 from enum import Enum
 
+# --- project scope ------------------------------------------------------------
+
+# The observatory studies 2020-01-01 onward. Everything temporal derives from
+# this constant — era definitions, backfill defaults, scan ranges — so moving
+# scope is a one-line change.
+#
+# Chosen for the study, not for the archive: 2020-2021 is a clean pre-Copilot
+# baseline, and the window then covers the whole assistant-adoption curve.
+# GH Archive itself reaches back to 2011 and pass 1 already imported from 2016;
+# those rows are out of scope rather than wrong, and era_for() returns None for
+# them, which is the signal that they sit outside what this project claims.
+PROJECT_START = dt.date(2020, 1, 1)
+
+
+def in_scope(when: "dt.date | dt.datetime") -> bool:
+    """Is this moment inside the project's declared coverage?"""
+    day = when.date() if isinstance(when, dt.datetime) else when
+    return day >= PROJECT_START
+
+
 # --- provenance ---------------------------------------------------------------
 
 
@@ -256,7 +276,7 @@ class Era:
 ERAS: tuple[Era, ...] = (
     Era(
         name="census",
-        start=dt.date(2015, 1, 1),
+        start=PROJECT_START,
         end=dt.date(2025, 5, 31),
         summary=(
             "Full public events feed with rich payloads. Treated as a census "

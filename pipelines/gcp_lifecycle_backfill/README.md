@@ -66,7 +66,7 @@ python pipelines/gcp_lifecycle_backfill/submit.py backfill \
     --project sematryx-481510 \
     --region us-central1 \
     --bucket <your-bucket> \
-    --years 2016-2025
+    --years 2020-2025
 ```
 
 ## Cost expectations (revise from bench)

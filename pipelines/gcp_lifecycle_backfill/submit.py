@@ -334,7 +334,7 @@ def build_argparser() -> argparse.ArgumentParser:
 
     bf = subs.add_parser("backfill", parents=[common],
                          help="year-range backfill (default: 12 monthly batches per year)")
-    bf.add_argument("--years", default="2016-2025",
+    bf.add_argument("--years", default="2020-2025",
                     help="e.g. 2016-2025 or 2019 or 2019,2020,2021")
     bf.add_argument("--yearly", action="store_true",
                     help="opt out of monthly decomposition — one batch per year."

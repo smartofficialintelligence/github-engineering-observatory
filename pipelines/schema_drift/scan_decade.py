@@ -146,7 +146,7 @@ def load_existing(output_path: Path) -> set[str]:
 
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    p.add_argument("--years", default="2016-2025",
+    p.add_argument("--years", default="2020-2025",
                    help="monthly cadence: e.g. 2016-2025 or 2019,2020")
     p.add_argument("--cadence", choices=("monthly", "weekly"), default="monthly")
     p.add_argument("--start", help="weekly cadence: first date, YYYY-MM-DD")

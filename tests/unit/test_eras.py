@@ -41,7 +41,11 @@ def test_era_for_covers_every_era():
 
 
 def test_era_for_returns_none_before_coverage():
+    """Rows the archive has but the project does not claim."""
     assert eras.era_for(dt.date(2010, 1, 1)) is None
+    assert eras.era_for(dt.date(2019, 6, 1)) is None
+    assert not eras.in_scope(dt.date(2019, 12, 31))
+    assert eras.in_scope(eras.PROJECT_START)
 
 
 def test_era_for_accepts_datetime():
@@ -128,12 +132,12 @@ def test_commit_metrics_end_at_the_stripping_boundary():
     assert "merge_blind" in rule.invalid_eras
     assert "merge_restored" in rule.invalid_eras
     start, end = eras.valid_range_for("commits")
-    assert start == dt.date(2015, 1, 1)
+    assert start == eras.PROJECT_START
     assert end == dt.date(2025, 10, 8)
 
 
 def test_valid_range_for_unrestricted_metric_is_open_ended():
-    assert eras.valid_range_for("push_events") == (dt.date(2015, 1, 1), None)
+    assert eras.valid_range_for("push_events") == (eras.PROJECT_START, None)
 
 
 def test_metric_classification_helpers_partition_the_rules():
@@ -154,7 +158,7 @@ def test_eras_spanned_within_one_era():
 
 
 def test_eras_spanned_across_the_decade():
-    spanned = eras.eras_spanned(dt.date(2015, 1, 1), dt.date(2026, 1, 1))
+    spanned = eras.eras_spanned(eras.PROJECT_START, dt.date(2026, 1, 1))
     assert [e.name for e in spanned] == [
         "census", "filtered", "merge_blind", "merge_restored",
     ]
@@ -223,7 +227,7 @@ def test_unassessed_metric_defaults_to_era_bound():
 def test_unassessed_metric_warns_on_cross_era_comparison():
     warnings = eras.check_comparison(
         "some_metric_nobody_has_assessed",
-        dt.date(2015, 1, 1), dt.date(2026, 1, 1),
+        eras.PROJECT_START, dt.date(2026, 1, 1),
     )
     assert warnings
 
