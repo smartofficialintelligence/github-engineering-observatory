@@ -402,22 +402,31 @@ RETENTION_AT_JUNE_2025: dict[str, float] = {
 
 
 def rebase_sql(metric: str, ts_column: str = "event_hour") -> str:
-    """Scale pre-boundary values onto the post-boundary basis.
+    """Put the post-2025-06-01 segment onto the historical basis.
 
-    Puts history on today's measurement footing so a series crossing
-    2025-06-01 is continuous. The result is an **estimate**, not a
-    measurement — it assumes the retention ratio measured at the boundary
-    held for the whole prior period, which is exactly the assumption a
-    statistical agency makes when splicing an index across a methodology
-    change. Label it as such wherever it is shown.
+    Direction matters. The obvious move is to scale history down onto
+    today's footing, but that converts ~113 measured months into
+    estimates on the strength of a 5-month anchor — discarding
+    information we actually collected. Scaling the short recent segment
+    up instead leaves the long measured record untouched and confines
+    the estimate to the ~11 months where collection is known to have
+    changed.
 
-    Metrics with no measured factor pass through unchanged.
+    Both directions are counterfactual; only the count of affected
+    months differs, and fewer is better when the many are measured and
+    the few are not.
+
+    The factor is the reciprocal of the measured retention: pushes
+    retained 0.696, so the post-boundary segment is scaled by 1/0.696.
+
+    Metrics with no measured factor pass through unchanged. Nothing is
+    scaled before the boundary.
     """
     factor = RETENTION_AT_JUNE_2025.get(metric)
     if factor is None:
         return metric
-    return (f"CASE WHEN CAST({ts_column} AS DATE) < DATE'{SPLICE_BOUNDARY}' "
-            f"THEN {metric} * {factor} ELSE {metric} END")
+    return (f"CASE WHEN CAST({ts_column} AS DATE) >= DATE'{SPLICE_BOUNDARY}' "
+            f"THEN {metric} / {factor} ELSE {metric} END")
 
 
 # --- metric comparability ------------------------------------------------------

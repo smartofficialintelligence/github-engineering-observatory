@@ -54,10 +54,11 @@ STANDARDIZE_NOTE = """\
 constraints of the most constrained era to the whole series: collection-outage
 days are dropped (they are floors, not measurements), and metrics read NULL
 where the signal was structurally absent rather than 0 — a zero is
-indistinguishable from "it stopped happening"; and levels before 2025-06-01 are
-**re-based** onto today's measurement footing, which closes the artificial step
-where the feed began publishing ~30% fewer events. Re-based values are
-estimates, not measurements. Switch to *Raw* to see the record as collected,
+indistinguishable from "it stopped happening"; and levels from 2025-06-01 on are
+**scaled** onto the historical basis, which closes the artificial step where the
+feed began publishing ~30% fewer events. The adjustment is applied to the recent
+segment rather than to history, so the ~113 measured months stay measured and
+only the ~11 affected ones become estimates. Switch to *Raw* to see the record as collected,
 step and all.
 
 Re-basing covers the 2025-06-01 step only, where the cut was measured and
@@ -95,33 +96,34 @@ def dataset(name: str, query: str, *, standardizable: bool = False) -> dict:
 
 
 def regime_case(ts: str = "event_hour") -> str:
-    """Label each month by what its numbers are and on whose basis.
+    """Label each month by whether its value is measured or adjusted.
 
-    Three segments, because two were misleading. Saying only "re-based
-    estimate" left open *to what*, and since the post-boundary line runs
-    to 2026 the natural reading was "re-based to today" — which is wrong.
-    The anchor is the Jun-Oct 2025 window, the one stretch after the step
-    where volume is stable.
+    The adjusted segment is the recent one, not the historical one. An
+    earlier version scaled 113 measured months down onto a 5-month
+    anchor, which reads wrong because it is wrong: it converts the
+    best-established part of the record into estimates on the strength
+    of the least. Adjusting the short recent segment up instead leaves
+    the measured history alone.
 
-    The third segment exists because that stability does not last: push
-    volume rises ~53% from mid-2025 to mid-2026 while total events stay
-    flat and non-push collapses, which is consistent with a throughput
-    cap letting pushes fill the vacated quota. Unresolved, so the label
-    says the basis drifts rather than asserting a mechanism.
+    The third segment is split out because the post-October drift means
+    a single factor is on weaker ground there — pushes rise ~53% while
+    total events stay flat, so the adjustment is directionally right but
+    its size is less certain.
     """
     boundary = f"DATE'{eras.SPLICE_BOUNDARY}'"
-    anchor_end = "DATE'2025-10-08'"
     before = f"date_trunc('MONTH', {ts}) < {boundary}"
     anchor = (f"date_trunc('MONTH', {ts}) >= {boundary} "
-              f"AND CAST({ts} AS DATE) <= {anchor_end}")
+              f"AND CAST({ts} AS DATE) <= DATE'2025-10-08'")
     return (
-        f"CASE WHEN {before} AND {_MODE} = '{MODE_STD}' "
-        f"THEN 'to May 2025 — re-based onto the Jun-Oct 2025 basis' "
-        f"WHEN {before} "
-        f"THEN 'to May 2025 — as collected' "
+        f"CASE WHEN {before} "
+        f"THEN 'to May 2025 — measured' "
+        f"WHEN {anchor} AND {_MODE} = '{MODE_STD}' "
+        f"THEN 'Jun-Oct 2025 — scaled to the historical basis' "
         f"WHEN {anchor} "
-        f"THEN 'Jun-Oct 2025 — measured (the re-basing anchor)' "
-        f"ELSE 'Oct 2025 on — measured, but basis drifts (+53% pushes)' END"
+        f"THEN 'Jun-Oct 2025 — as collected (~30% fewer published)' "
+        f"WHEN {_MODE} = '{MODE_STD}' "
+        f"THEN 'Oct 2025 on — scaled, but basis drifts (+53% pushes)' "
+        f"ELSE 'Oct 2025 on — as collected' END"
     )
 
 
