@@ -28,14 +28,34 @@ every era being compared.
 In the current feed, stars run at roughly 44/hour for all of public
 GitHub. That is not a schema problem: `WatchEvent` still has all its
 fields, there are simply almost none of them. Field intersection cannot
-help. Worse, the filtering was not uniform — pushes fell ~28% at the June
-2025 step while non-push classes fell much harder, so the event *mix* is
-distorted as well as the level.
+help.
+
+Two separate events produce this, and an earlier version of this document
+merged them into one — worth stating plainly, because the merged version
+got the mechanism backwards.
+
+**June 2025 — a roughly uniform cut.** Measured over 8 weeks either side,
+pushes retained 69.6% and non-push 74.5%; push share moved 64.0% → 62.5%.
+Non-push held up marginally *better*, and the event mix was largely
+preserved. Human events retained 71.9% against bots' 69.8%, a 2.1-point
+spread that is noise. Event counts cluster near 70% while distinct-entity
+counts sit near 80% — the arithmetic signature of uniform subsampling,
+since an actor disappears only when every one of its events is dropped.
+Consistent with uniform sampling; not proof of it, since we still have no
+direct evidence of mechanism (OQ-1).
+
+**2026 — a progressive non-push collapse.** This is what actually drove
+push share to ~92%. PR share fell 7.1% (2025-09) → 3.5% (2026-03) → 0.1%
+(2026-07), issues and stars to ~0%. Monotonic rather than stepped, and
+still in motion at last measurement. Shape and exact onset are being
+characterised; until that lands, treat lifecycle metrics after roughly
+2026-Q1 as unavailable rather than as measurements.
 
 **Not correctable.** The defence is to prefer quantities invariant to
 proportional subsampling — shares, ratios, concentration, distribution
-shape — over absolute levels. "Pushes per hour" across the boundary
-misleads; "bot share of pushes" or "top-100 actor share" largely survives.
+shape — over absolute levels. That defence holds for the June 2025 step,
+where sampling looks uniform. It does **not** rescue the 2026 collapse:
+when a class falls to 0.1% of the feed, no ratio recovers it.
 
 ### 3. Collection outages — the archive itself failed
 

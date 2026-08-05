@@ -57,6 +57,23 @@ def sample_hours(years: list[int], day_of_month: int, hour: int) -> list[str]:
     return out
 
 
+def weekly_hours(start: dt.date, end: dt.date, weekday: int, hour: int) -> list[str]:
+    """One hour per week, always the same weekday.
+
+    Holding the weekday fixed matters more than it looks: PR and issue
+    activity fall sharply at weekends, so a monthly sample taken on a
+    fixed day-of-month rotates through the week and injects swings that
+    look like signal. A fixed weekday removes that confound.
+    """
+    now = dt.datetime.now(dt.UTC).date()
+    cur = start + dt.timedelta(days=(weekday - start.weekday()) % 7)
+    out: list[str] = []
+    while cur <= min(end, now - dt.timedelta(days=1)):
+        out.append(f"{cur:%Y-%m-%d}-{hour}")
+        cur += dt.timedelta(weeks=1)
+    return out
+
+
 def profile_hour(hour_spec: str, raw_dir: str) -> dict:
     """Download + profile one hour. Returns a compact per-hour summary."""
     result = download_hour(hour_spec, raw_dir)
@@ -130,7 +147,12 @@ def load_existing(output_path: Path) -> set[str]:
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--years", default="2016-2025",
-                   help="e.g. 2016-2025 or 2019 or 2019,2020,2021")
+                   help="monthly cadence: e.g. 2016-2025 or 2019,2020")
+    p.add_argument("--cadence", choices=("monthly", "weekly"), default="monthly")
+    p.add_argument("--start", help="weekly cadence: first date, YYYY-MM-DD")
+    p.add_argument("--end", help="weekly cadence: last date, YYYY-MM-DD")
+    p.add_argument("--weekday", type=int, default=2,
+                   help="weekly cadence: 0=Mon..6=Sun (default 2, Wednesday)")
     p.add_argument("--day", type=int, default=15, help="day of month to sample (default 15)")
     p.add_argument("--hour", type=int, default=12, help="hour of day UTC (default 12)")
     p.add_argument("--dest", default=None, help="local dir for raw downloads")
@@ -156,7 +178,15 @@ def main(argv=None) -> int:
     raw_dir = args.dest or f"/tmp/schema_drift_raw_{os.getpid()}"
     os.makedirs(raw_dir, exist_ok=True)
 
-    todo = [h for h in sample_hours(years, args.day, args.hour) if h not in already]
+    if args.cadence == "weekly":
+        if not (args.start and args.end):
+            p.error("--cadence weekly requires --start and --end")
+        planned = weekly_hours(dt.date.fromisoformat(args.start),
+                               dt.date.fromisoformat(args.end),
+                               args.weekday, args.hour)
+    else:
+        planned = sample_hours(years, args.day, args.hour)
+    todo = [h for h in planned if h not in already]
     print(f"planned: {len(todo)} hours ({args.parallel} parallel)")
     if not todo:
         print("nothing to do")

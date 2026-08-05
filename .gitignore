@@ -25,3 +25,4 @@ _download_audit.jsonl
 # a decade sample runs to hundreds of MB. Regenerate with scan_decade.py;
 # commit the derived timeline and outage map instead.
 artifacts/schema_drift/hourly_profiles.jsonl
+artifacts/schema_drift/weekly_2025_2026.jsonl

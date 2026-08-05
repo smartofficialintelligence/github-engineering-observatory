@@ -16,9 +16,15 @@ metric only from fields present in every era being compared.
 stream stars run at ~44/hour for all of public GitHub, which is
 implausible; those WatchEvents are not in the feed at all. No amount of
 field-intersection fixes this, because the field is present — there are
-simply too few rows. Worse, the filtering was not uniform across event
-types (pushes fell ~28% in the June 2025 step while non-push classes fell
-far harder), so the event *mix* is distorted too.
+simply too few rows.
+
+Two distinct events cause it, and merging them reverses the mechanism.
+June 2025 was a roughly *uniform* cut — pushes retained 69.6%, non-push
+74.5%, human 71.9% against bots 69.8%, push share barely moving
+(64.0% -> 62.5%). The push-share rise to ~92% came later, from a
+progressive non-push collapse through 2026 (PR share 7.1% -> 0.1%).
+Shares and ratios survive the first; nothing survives the second once a
+class reaches 0.1% of the feed.
 
 The consequence for analysis:
 
@@ -268,13 +274,18 @@ ERAS: tuple[Era, ...] = (
         start=dt.date(2025, 6, 1),
         end=dt.date(2025, 10, 8),
         summary=(
-            "Upstream filtering begins. Total volume down ~26%; non-push "
-            "classes cut far harder than pushes. Payload merge signal still "
-            "present."
+            "Upstream filtering begins. Total volume down ~29%, and the cut "
+            "is roughly uniform: pushes retained 69.6%, non-push 74.5%, "
+            "human 71.9% against bots 69.8%. Push share barely moved "
+            "(64.0% -> 62.5%). Payload merge signal still present."
         ),
         caveats=(
-            "Absolute levels for non-push classes are a sample of unknown "
-            "coverage — do not publish as census counts.",
+            "Absolute levels are a sample of unknown coverage — do not "
+            "publish as census counts. The sampling looks uniform, so "
+            "shares and ratios survive better than levels.",
+            "The push-share rise to ~92% belongs to the 2026 non-push "
+            "collapse, not to this era; conflating the two reverses the "
+            "mechanism.",
             "The 2025-06-01 start is month-resolution only (INFERRED).",
         ),
     ),
