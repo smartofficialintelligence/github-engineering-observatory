@@ -35,7 +35,7 @@
       "name": "regime_monthly",
       "displayName": "regime_monthly",
       "queryLines": [
-        "\n            SELECT date_trunc('MONTH', event_hour) AS month,\n                   ROUND(SUM(CASE WHEN IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Standardized (comparable across eras)' THEN (CASE WHEN CAST(event_hour AS DATE) < DATE'2025-06-01' THEN push_events * 0.696 ELSE push_events END) ELSE push_events END)\n                         / SUM(CASE WHEN IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Standardized (comparable across eras)' THEN (CASE WHEN CAST(event_hour AS DATE) < DATE'2025-06-01' THEN total_events * 0.714 ELSE total_events END) ELSE total_events END), 4) AS push_share,\n                   CASE WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01' AND IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Standardized (comparable across eras)' THEN 'to May 2025 \u2014 re-based estimate' WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01' THEN 'to May 2025 \u2014 as collected' ELSE 'Jun 2025 on \u2014 as collected (~30% fewer events published)' END AS regime\n            FROM github_observatory.gold.ecosystem_hourly\n            WHERE (IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Raw (as collected)' OR NOT in_outage)\n            GROUP BY 1, 3"
+        "\n            SELECT date_trunc('MONTH', event_hour) AS month,\n                   ROUND(SUM(CASE WHEN IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Standardized (comparable across eras)' THEN (CASE WHEN CAST(event_hour AS DATE) < DATE'2025-06-01' THEN push_events * 0.696 ELSE push_events END) ELSE push_events END)\n                         / SUM(CASE WHEN IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Standardized (comparable across eras)' THEN (CASE WHEN CAST(event_hour AS DATE) < DATE'2025-06-01' THEN total_events * 0.714 ELSE total_events END) ELSE total_events END), 4) AS push_share,\n                   CASE WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01' AND IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Standardized (comparable across eras)' THEN 'to May 2025 \u2014 re-based onto the Jun-Oct 2025 basis' WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01' THEN 'to May 2025 \u2014 as collected' WHEN date_trunc('MONTH', event_hour) >= DATE'2025-06-01' AND CAST(event_hour AS DATE) <= DATE'2025-10-08' THEN 'Jun-Oct 2025 \u2014 measured (the re-basing anchor)' ELSE 'Oct 2025 on \u2014 measured, but basis drifts (+53% pushes)' END AS regime\n            FROM github_observatory.gold.ecosystem_hourly\n            WHERE (IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Raw (as collected)' OR NOT in_outage)\n            GROUP BY 1, 3"
       ],
       "parameters": [
         {
@@ -59,7 +59,7 @@
       "name": "production_decade",
       "displayName": "production_decade",
       "queryLines": [
-        "\n            SELECT date_trunc('MONTH', event_hour) AS month,\n                   CAST(SUM(CASE WHEN IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Standardized (comparable across eras)' THEN (CASE WHEN CAST(event_hour AS DATE) < DATE'2025-06-01' THEN push_events * 0.696 ELSE push_events END) ELSE push_events END) / COUNT(*) AS BIGINT)\n                       AS pushes_per_hour,\n                   CASE WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01' AND IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Standardized (comparable across eras)' THEN 'to May 2025 \u2014 re-based estimate' WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01' THEN 'to May 2025 \u2014 as collected' ELSE 'Jun 2025 on \u2014 as collected (~30% fewer events published)' END AS regime\n            FROM github_observatory.gold.ecosystem_hourly\n            WHERE (IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Raw (as collected)' OR NOT in_outage)\n            GROUP BY 1, 3"
+        "\n            SELECT date_trunc('MONTH', event_hour) AS month,\n                   CAST(SUM(CASE WHEN IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Standardized (comparable across eras)' THEN (CASE WHEN CAST(event_hour AS DATE) < DATE'2025-06-01' THEN push_events * 0.696 ELSE push_events END) ELSE push_events END) / COUNT(*) AS BIGINT)\n                       AS pushes_per_hour,\n                   CASE WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01' AND IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Standardized (comparable across eras)' THEN 'to May 2025 \u2014 re-based onto the Jun-Oct 2025 basis' WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01' THEN 'to May 2025 \u2014 as collected' WHEN date_trunc('MONTH', event_hour) >= DATE'2025-06-01' AND CAST(event_hour AS DATE) <= DATE'2025-10-08' THEN 'Jun-Oct 2025 \u2014 measured (the re-basing anchor)' ELSE 'Oct 2025 on \u2014 measured, but basis drifts (+53% pushes)' END AS regime\n            FROM github_observatory.gold.ecosystem_hourly\n            WHERE (IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Raw (as collected)' OR NOT in_outage)\n            GROUP BY 1, 3"
       ],
       "parameters": [
         {
@@ -203,7 +203,7 @@
       "name": "bot_share_decade",
       "displayName": "bot_share_decade",
       "queryLines": [
-        "\n            SELECT date_trunc('MONTH', event_hour) AS month,\n                   ROUND(SUM(CASE WHEN IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Standardized (comparable across eras)' THEN (CASE WHEN CAST(event_hour AS DATE) < DATE'2025-06-01' THEN bot_events * 0.698 ELSE bot_events END) ELSE bot_events END)\n                         / SUM(CASE WHEN IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Standardized (comparable across eras)' THEN (CASE WHEN CAST(event_hour AS DATE) < DATE'2025-06-01' THEN total_events * 0.714 ELSE total_events END) ELSE total_events END), 4) AS bot_share,\n                   CASE WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01' AND IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Standardized (comparable across eras)' THEN 'to May 2025 \u2014 re-based estimate' WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01' THEN 'to May 2025 \u2014 as collected' ELSE 'Jun 2025 on \u2014 as collected (~30% fewer events published)' END AS regime\n            FROM github_observatory.gold.ecosystem_hourly\n            WHERE (IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Raw (as collected)' OR NOT in_outage)\n            GROUP BY 1, 3"
+        "\n            SELECT date_trunc('MONTH', event_hour) AS month,\n                   ROUND(SUM(CASE WHEN IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Standardized (comparable across eras)' THEN (CASE WHEN CAST(event_hour AS DATE) < DATE'2025-06-01' THEN bot_events * 0.698 ELSE bot_events END) ELSE bot_events END)\n                         / SUM(CASE WHEN IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Standardized (comparable across eras)' THEN (CASE WHEN CAST(event_hour AS DATE) < DATE'2025-06-01' THEN total_events * 0.714 ELSE total_events END) ELSE total_events END), 4) AS bot_share,\n                   CASE WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01' AND IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Standardized (comparable across eras)' THEN 'to May 2025 \u2014 re-based onto the Jun-Oct 2025 basis' WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01' THEN 'to May 2025 \u2014 as collected' WHEN date_trunc('MONTH', event_hour) >= DATE'2025-06-01' AND CAST(event_hour AS DATE) <= DATE'2025-10-08' THEN 'Jun-Oct 2025 \u2014 measured (the re-basing anchor)' ELSE 'Oct 2025 on \u2014 measured, but basis drifts (+53% pushes)' END AS regime\n            FROM github_observatory.gold.ecosystem_hourly\n            WHERE (IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Raw (as collected)' OR NOT in_outage)\n            GROUP BY 1, 3"
       ],
       "parameters": [
         {
@@ -227,7 +227,7 @@
       "name": "actors_decade",
       "displayName": "actors_decade",
       "queryLines": [
-        "\n            SELECT date_trunc('MONTH', event_hour) AS month,\n                   CAST(AVG(CASE WHEN IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Standardized (comparable across eras)' THEN (CASE WHEN CAST(event_hour AS DATE) < DATE'2025-06-01' THEN distinct_actors * 0.806 ELSE distinct_actors END) ELSE distinct_actors END) AS BIGINT)\n                       AS avg_hourly_actors,\n                   CAST(AVG(CASE WHEN IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Standardized (comparable across eras)' THEN (CASE WHEN CAST(event_hour AS DATE) < DATE'2025-06-01' THEN distinct_actors_human * 0.805 ELSE distinct_actors_human END) ELSE distinct_actors_human END) AS BIGINT)\n                       AS avg_hourly_actors_human,\n                   CASE WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01' AND IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Standardized (comparable across eras)' THEN 'to May 2025 \u2014 re-based estimate' WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01' THEN 'to May 2025 \u2014 as collected' ELSE 'Jun 2025 on \u2014 as collected (~30% fewer events published)' END AS regime\n            FROM github_observatory.gold.ecosystem_hourly\n            WHERE (IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Raw (as collected)' OR NOT in_outage)\n            GROUP BY 1, 4"
+        "\n            SELECT date_trunc('MONTH', event_hour) AS month,\n                   CAST(AVG(CASE WHEN IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Standardized (comparable across eras)' THEN (CASE WHEN CAST(event_hour AS DATE) < DATE'2025-06-01' THEN distinct_actors * 0.806 ELSE distinct_actors END) ELSE distinct_actors END) AS BIGINT)\n                       AS avg_hourly_actors,\n                   CAST(AVG(CASE WHEN IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Standardized (comparable across eras)' THEN (CASE WHEN CAST(event_hour AS DATE) < DATE'2025-06-01' THEN distinct_actors_human * 0.805 ELSE distinct_actors_human END) ELSE distinct_actors_human END) AS BIGINT)\n                       AS avg_hourly_actors_human,\n                   CASE WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01' AND IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Standardized (comparable across eras)' THEN 'to May 2025 \u2014 re-based onto the Jun-Oct 2025 basis' WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01' THEN 'to May 2025 \u2014 as collected' WHEN date_trunc('MONTH', event_hour) >= DATE'2025-06-01' AND CAST(event_hour AS DATE) <= DATE'2025-10-08' THEN 'Jun-Oct 2025 \u2014 measured (the re-basing anchor)' ELSE 'Oct 2025 on \u2014 measured, but basis drifts (+53% pushes)' END AS regime\n            FROM github_observatory.gold.ecosystem_hourly\n            WHERE (IFNULL(:standardize, 'Standardized (comparable across eras)') = 'Raw (as collected)' OR NOT in_outage)\n            GROUP BY 1, 4"
       ],
       "parameters": [
         {
@@ -765,7 +765,7 @@
               "version": 3,
               "widgetType": "line",
               "frame": {
-                "title": "Pushes per hour, monthly avg \u2014 the production unit, 2016-present",
+                "title": "Pushes per hour, monthly avg \u2014 the production unit, 2020-present",
                 "showTitle": true
               },
               "encodings": {
@@ -1712,7 +1712,7 @@
               "version": 3,
               "widgetType": "line",
               "frame": {
-                "title": "Bot share of all events \u2014 the automation curve, 2016-present",
+                "title": "Bot share of all events \u2014 the automation curve, 2020-present",
                 "showTitle": true
               },
               "encodings": {
@@ -1781,7 +1781,7 @@
               "version": 3,
               "widgetType": "line",
               "frame": {
-                "title": "Avg distinct actors per hour, 2016-present (all vs human)",
+                "title": "Avg distinct actors per hour, 2020-present (all vs human)",
                 "showTitle": true
               },
               "encodings": {

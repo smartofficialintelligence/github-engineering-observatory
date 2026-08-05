@@ -95,23 +95,33 @@ def dataset(name: str, query: str, *, standardizable: bool = False) -> dict:
 
 
 def regime_case(ts: str = "event_hour") -> str:
-    """Label each month by what its numbers actually are.
+    """Label each month by what its numbers are and on whose basis.
 
-    Under Standardized the pre-boundary side is re-based, so the useful
-    split is estimate-vs-measurement, not "full"-vs-"filtered". Under Raw
-    nothing is adjusted and the split marks where the feed changed.
+    Three segments, because two were misleading. Saying only "re-based
+    estimate" left open *to what*, and since the post-boundary line runs
+    to 2026 the natural reading was "re-based to today" — which is wrong.
+    The anchor is the Jun-Oct 2025 window, the one stretch after the step
+    where volume is stable.
 
-    The old label said "filtered feed", which implied selective filtering.
-    The cut was measured as roughly uniform, so that wording described a
-    mechanism we had ruled out.
+    The third segment exists because that stability does not last: push
+    volume rises ~53% from mid-2025 to mid-2026 while total events stay
+    flat and non-push collapses, which is consistent with a throughput
+    cap letting pushes fill the vacated quota. Unresolved, so the label
+    says the basis drifts rather than asserting a mechanism.
     """
-    before = f"date_trunc('MONTH', {ts}) < DATE'{eras.SPLICE_BOUNDARY}'"
+    boundary = f"DATE'{eras.SPLICE_BOUNDARY}'"
+    anchor_end = "DATE'2025-10-08'"
+    before = f"date_trunc('MONTH', {ts}) < {boundary}"
+    anchor = (f"date_trunc('MONTH', {ts}) >= {boundary} "
+              f"AND CAST({ts} AS DATE) <= {anchor_end}")
     return (
         f"CASE WHEN {before} AND {_MODE} = '{MODE_STD}' "
-        f"THEN 'to May 2025 — re-based estimate' "
+        f"THEN 'to May 2025 — re-based onto the Jun-Oct 2025 basis' "
         f"WHEN {before} "
         f"THEN 'to May 2025 — as collected' "
-        f"ELSE 'Jun 2025 on — as collected (~30% fewer events published)' END"
+        f"WHEN {anchor} "
+        f"THEN 'Jun-Oct 2025 — measured (the re-basing anchor)' "
+        f"ELSE 'Oct 2025 on — measured, but basis drifts (+53% pushes)' END"
     )
 
 
@@ -530,7 +540,7 @@ OBSERVATORY = {
                                "production_hourly_stream"], (0, 0, 3, 2)),
                 text_widget("std_production_note", STANDARDIZE_NOTE, (3, 0, 3, 2)),
                 widget("pushes_decade", "production_decade", "line",
-                       "Pushes per hour, monthly avg — the production unit, 2016-present",
+                       "Pushes per hour, monthly avg — the production unit, 2020-present",
                        line_enc("month", "pushes_per_hour", color="regime"),
                        (0, 0, 3, 7),
                        fields=[field("month"), field("pushes_per_hour"), field("regime")]),
@@ -612,12 +622,12 @@ OBSERVATORY = {
                                "contribution"], (0, 0, 3, 2)),
                 text_widget("std_contribution_note", STANDARDIZE_NOTE, (3, 0, 3, 2)),
                 widget("bot_curve", "bot_share_decade", "line",
-                       "Bot share of all events — the automation curve, 2016-present",
+                       "Bot share of all events — the automation curve, 2020-present",
                        line_enc("month", "bot_share", color="regime"),
                        (0, 0, 3, 7),
                        fields=[field("month"), field("bot_share"), field("regime")]),
                 widget("actors_curve", "actors_decade", "line",
-                       "Avg distinct actors per hour, 2016-present (all vs human)",
+                       "Avg distinct actors per hour, 2020-present (all vs human)",
                        line_enc("month", "avg_hourly_actors", color="regime"),
                        (3, 0, 3, 7),
                        fields=[field("month"), field("avg_hourly_actors"),
