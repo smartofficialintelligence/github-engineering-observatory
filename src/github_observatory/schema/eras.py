@@ -368,6 +368,58 @@ def eras_spanned(start: dt.date, end: dt.date) -> tuple[Era, ...]:
     )
 
 
+# --- level re-basing (the June 2025 splice) -----------------------------------
+
+# Retention across the 2025-06-01 step, measured over 8 weeks either side
+# (2025-04-06 .. 2025-07-27) with outage hours excluded. Eight weeks is short
+# enough that real ecosystem trend is negligible, so the ratio isolates the
+# collection change.
+#
+# These are usable as splice factors *because the cut was uniform*: pushes
+# retained 69.6% against non-push 74.5%, humans 71.9% against bots 69.8%.
+# Had the cut been selective, one factor per metric would not be defensible
+# and no amount of stratification would have rescued it, since the ratio
+# conflates collection loss with real change either way.
+#
+# The two clusters are physically meaningful. Event counts land near 0.70;
+# distinct-entity counts near 0.80, because an actor is lost only when every
+# one of its events is dropped.
+#
+# Applies ONLY to the 2025-06-01 boundary. Do not extend these past
+# 2025-10-08 — the feed flaps weekly through 2026 and offers no stable basis.
+SPLICE_BOUNDARY = dt.date(2025, 6, 1)
+
+RETENTION_AT_JUNE_2025: dict[str, float] = {
+    "total_events":          0.714,
+    "total_events_human":    0.719,
+    "bot_events":            0.698,
+    "push_events":           0.696,
+    "push_events_human":     0.711,
+    "distinct_actors":       0.806,
+    "distinct_actors_human": 0.805,
+    "distinct_repos":        0.803,
+}
+
+
+def rebase_sql(metric: str, ts_column: str = "event_hour") -> str:
+    """Scale pre-boundary values onto the post-boundary basis.
+
+    Puts history on today's measurement footing so a series crossing
+    2025-06-01 is continuous. The result is an **estimate**, not a
+    measurement — it assumes the retention ratio measured at the boundary
+    held for the whole prior period, which is exactly the assumption a
+    statistical agency makes when splicing an index across a methodology
+    change. Label it as such wherever it is shown.
+
+    Metrics with no measured factor pass through unchanged.
+    """
+    factor = RETENTION_AT_JUNE_2025.get(metric)
+    if factor is None:
+        return metric
+    return (f"CASE WHEN CAST({ts_column} AS DATE) < DATE'{SPLICE_BOUNDARY}' "
+            f"THEN {metric} * {factor} ELSE {metric} END")
+
+
 # --- metric comparability ------------------------------------------------------
 
 

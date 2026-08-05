@@ -54,10 +54,16 @@ STANDARDIZE_NOTE = """\
 constraints of the most constrained era to the whole series: collection-outage
 days are dropped (they are floors, not measurements), and metrics read NULL
 where the signal was structurally absent rather than 0 — a zero is
-indistinguishable from "it stopped happening". Switch to *Raw* to see the
-record as collected. Sampling distortion is **not** repaired either way;
-absolute levels remain incomparable across 2025-06-01, only shares and
-within-era trend. See `docs/normalization_basis.md`."""
+indistinguishable from "it stopped happening"; and levels before 2025-06-01 are
+**re-based** onto today's measurement footing, which closes the artificial step
+where the feed began publishing ~30% fewer events. Re-based values are
+estimates, not measurements. Switch to *Raw* to see the record as collected,
+step and all.
+
+Re-basing covers the 2025-06-01 step only, where the cut was measured and
+uniform. It is **not** applied after 2025-10-08: the feed flaps week to week
+through 2026 and offers no stable basis to index against, so lifecycle series
+there are unavailable rather than adjusted. See `docs/normalization_basis.md`."""
 
 # Static option list for the dropdown. A dataset is required — the filter
 # widget takes its selectable values from a field, not from a literal.
@@ -86,6 +92,23 @@ def dataset(name: str, query: str, *, standardizable: bool = False) -> dict:
             },
         }]
     return d
+
+
+def std_rebased(metric: str, ts: str = "event_hour") -> str:
+    """Metric re-based onto today's measurement footing under Standardized.
+
+    This is what closes the visible step at 2025-06-01: without it the
+    series drops ~30% at the boundary and reads as a collapse in developer
+    activity, when it is the feed that changed. Raw leaves it alone so the
+    break stays visible for anyone who wants the record as collected.
+
+    Pre-boundary values become estimates. The page note says so.
+    """
+    rebased = eras.rebase_sql(metric, ts)
+    if rebased == metric:
+        return metric  # no measured factor — nothing to re-base
+    return (f"CASE WHEN {_MODE} = '{MODE_STD}' THEN ({rebased}) "
+            f"ELSE {metric} END")
 
 
 def std_metric(metric: str, ts: str = "event_hour") -> str:
@@ -308,7 +331,8 @@ OBSERVATORY = {
             GROUP BY 1, 2""", standardizable=True),
         dataset("regime_monthly", f"""
             SELECT date_trunc('MONTH', event_hour) AS month,
-                   ROUND(SUM(push_events) / SUM(total_events), 4) AS push_share,
+                   ROUND(SUM({std_rebased('push_events')})
+                         / SUM({std_rebased('total_events')}), 4) AS push_share,
                    CASE WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01'
                         THEN 'full feed (thru May 2025)'
                         ELSE 'filtered feed (Jun 2025 on, OQ-1)' END AS regime
@@ -318,7 +342,8 @@ OBSERVATORY = {
         # ---- production ----------------------------------------------------
         dataset("production_decade", f"""
             SELECT date_trunc('MONTH', event_hour) AS month,
-                   CAST(SUM(push_events) / COUNT(*) AS BIGINT) AS pushes_per_hour,
+                   CAST(SUM({std_rebased('push_events')}) / COUNT(*) AS BIGINT)
+                       AS pushes_per_hour,
                    CASE WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01'
                         THEN 'full feed (thru May 2025)'
                         ELSE 'filtered feed (Jun 2025 on, OQ-1)' END AS regime
@@ -328,7 +353,7 @@ OBSERVATORY = {
         dataset("production_yoy", f"""
             WITH m AS (
                 SELECT date_trunc('MONTH', event_hour) AS month,
-                       SUM(push_events) / COUNT(*) AS pushes_per_hour,
+                       SUM({std_rebased('push_events')}) / COUNT(*) AS pushes_per_hour,
                        COUNT(*) AS hours_observed
                 FROM {G}.ecosystem_hourly
                 WHERE {outage_where()}
@@ -401,7 +426,8 @@ OBSERVATORY = {
         # ---- contribution --------------------------------------------------
         dataset("bot_share_decade", f"""
             SELECT date_trunc('MONTH', event_hour) AS month,
-                   ROUND(SUM(bot_events) / SUM(total_events), 4) AS bot_share,
+                   ROUND(SUM({std_rebased('bot_events')})
+                         / SUM({std_rebased('total_events')}), 4) AS bot_share,
                    CASE WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01'
                         THEN 'full feed (thru May 2025)'
                         ELSE 'filtered feed (Jun 2025 on, OQ-1)' END AS regime
@@ -410,8 +436,9 @@ OBSERVATORY = {
             GROUP BY 1, 3""", standardizable=True),
         dataset("actors_decade", f"""
             SELECT date_trunc('MONTH', event_hour) AS month,
-                   CAST(AVG(distinct_actors) AS BIGINT) AS avg_hourly_actors,
-                   CAST(AVG(distinct_actors_human) AS BIGINT)
+                   CAST(AVG({std_rebased('distinct_actors')}) AS BIGINT)
+                       AS avg_hourly_actors,
+                   CAST(AVG({std_rebased('distinct_actors_human')}) AS BIGINT)
                        AS avg_hourly_actors_human,
                    CASE WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01'
                         THEN 'full feed (thru May 2025)'
