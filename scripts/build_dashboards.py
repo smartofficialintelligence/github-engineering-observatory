@@ -94,6 +94,27 @@ def dataset(name: str, query: str, *, standardizable: bool = False) -> dict:
     return d
 
 
+def regime_case(ts: str = "event_hour") -> str:
+    """Label each month by what its numbers actually are.
+
+    Under Standardized the pre-boundary side is re-based, so the useful
+    split is estimate-vs-measurement, not "full"-vs-"filtered". Under Raw
+    nothing is adjusted and the split marks where the feed changed.
+
+    The old label said "filtered feed", which implied selective filtering.
+    The cut was measured as roughly uniform, so that wording described a
+    mechanism we had ruled out.
+    """
+    before = f"date_trunc('MONTH', {ts}) < DATE'{eras.SPLICE_BOUNDARY}'"
+    return (
+        f"CASE WHEN {before} AND {_MODE} = '{MODE_STD}' "
+        f"THEN 'to May 2025 — re-based estimate' "
+        f"WHEN {before} "
+        f"THEN 'to May 2025 — as collected' "
+        f"ELSE 'Jun 2025 on — as collected (~30% fewer events published)' END"
+    )
+
+
 def std_rebased(metric: str, ts: str = "event_hour") -> str:
     """Metric re-based onto today's measurement footing under Standardized.
 
@@ -333,9 +354,7 @@ OBSERVATORY = {
             SELECT date_trunc('MONTH', event_hour) AS month,
                    ROUND(SUM({std_rebased('push_events')})
                          / SUM({std_rebased('total_events')}), 4) AS push_share,
-                   CASE WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01'
-                        THEN 'full feed (thru May 2025)'
-                        ELSE 'filtered feed (Jun 2025 on, OQ-1)' END AS regime
+                   {regime_case()} AS regime
             FROM {G}.ecosystem_hourly
             WHERE {outage_where()}
             GROUP BY 1, 3""", standardizable=True),
@@ -344,9 +363,7 @@ OBSERVATORY = {
             SELECT date_trunc('MONTH', event_hour) AS month,
                    CAST(SUM({std_rebased('push_events')}) / COUNT(*) AS BIGINT)
                        AS pushes_per_hour,
-                   CASE WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01'
-                        THEN 'full feed (thru May 2025)'
-                        ELSE 'filtered feed (Jun 2025 on, OQ-1)' END AS regime
+                   {regime_case()} AS regime
             FROM {G}.ecosystem_hourly
             WHERE {outage_where()}
             GROUP BY 1, 3""", standardizable=True),
@@ -428,9 +445,7 @@ OBSERVATORY = {
             SELECT date_trunc('MONTH', event_hour) AS month,
                    ROUND(SUM({std_rebased('bot_events')})
                          / SUM({std_rebased('total_events')}), 4) AS bot_share,
-                   CASE WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01'
-                        THEN 'full feed (thru May 2025)'
-                        ELSE 'filtered feed (Jun 2025 on, OQ-1)' END AS regime
+                   {regime_case()} AS regime
             FROM {G}.ecosystem_hourly
             WHERE {outage_where()}
             GROUP BY 1, 3""", standardizable=True),
@@ -440,9 +455,7 @@ OBSERVATORY = {
                        AS avg_hourly_actors,
                    CAST(AVG({std_rebased('distinct_actors_human')}) AS BIGINT)
                        AS avg_hourly_actors_human,
-                   CASE WHEN date_trunc('MONTH', event_hour) < DATE'2025-06-01'
-                        THEN 'full feed (thru May 2025)'
-                        ELSE 'filtered feed (Jun 2025 on, OQ-1)' END AS regime
+                   {regime_case()} AS regime
             FROM {G}.ecosystem_hourly
             WHERE {outage_where()}
             GROUP BY 1, 4""", standardizable=True),
