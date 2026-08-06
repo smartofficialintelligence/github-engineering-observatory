@@ -41,13 +41,29 @@ from pyspark.sql import functions as F
 
 from github_observatory.gold.metrics import create_gold_tables
 
-stream_before = spark.table("gold.ecosystem_hourly").count()
+# Rows that are already stream, plus any pre-v3 rows still carrying a NULL
+# source — the v3 migration turns the latter into the former. Counting the
+# whole table here (as an earlier version did) only worked while Gold held
+# nothing but stream rows; it has held bigquery history since the first
+# import, so that assertion could no longer pass.
+_gold = spark.table("gold.ecosystem_hourly")
+stream_before = _gold.filter(
+    (F.col("source") == "stream") | F.col("source").isNull()
+).count()
+total_before = _gold.count()
+
 create_gold_tables(spark)
-migrated = (
+
+stream_after = (
     spark.table("gold.ecosystem_hourly").filter(F.col("source") == "stream").count()
 )
-assert migrated == stream_before, "migration must mark every existing row as stream"
-print(f"schema v3 OK: {migrated} stream rows")
+assert stream_after == stream_before, (
+    f"migration changed the stream population: {stream_before} -> {stream_after}"
+)
+assert spark.table("gold.ecosystem_hourly").count() == total_before, (
+    "schema migration must not add or drop rows"
+)
+print(f"schema OK: {stream_after:,} stream rows of {total_before:,} total")
 
 # COMMAND ----------
 

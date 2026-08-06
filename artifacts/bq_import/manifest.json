@@ -98,5 +98,82 @@
     "artifact": "ecosystem_hourly_2025.csv",
     "exported_at": "2026-07-31T02:12:02+00:00",
     "source_table": "githubarchive.year.2025"
+  },
+  {
+    "year": 2026,
+    "period": "202601",
+    "job_id": "observatory_hourly_202601_20260805235524",
+    "query_sha256": "e39257304784ba5a373b028a97e58598f6207bb76ca8a95132d53397f4c4f8e8",
+    "rows": 744,
+    "bytes_billed": 7024410624,
+    "artifact": "ecosystem_hourly_202601.csv",
+    "exported_at": "2026-08-05T23:55:38+00:00",
+    "source_table": "githubarchive.month.202601"
+  },
+  {
+    "year": 2026,
+    "period": "202602",
+    "job_id": "observatory_hourly_202602_20260805235538",
+    "query_sha256": "e6298a7d0cdaf6f25e4cef57614b759f257aa4182e489585b91377a7483a35af",
+    "rows": 672,
+    "bytes_billed": 6311378944,
+    "artifact": "ecosystem_hourly_202602.csv",
+    "exported_at": "2026-08-05T23:55:50+00:00",
+    "source_table": "githubarchive.month.202602"
+  },
+  {
+    "year": 2026,
+    "period": "202603",
+    "job_id": "observatory_hourly_202603_20260805235550",
+    "query_sha256": "380ef5bca23327fda554c02b99a5f2e168b0ff27f9311224cbfcf9c19620d926",
+    "rows": 744,
+    "bytes_billed": 7403995136,
+    "artifact": "ecosystem_hourly_202603.csv",
+    "exported_at": "2026-08-05T23:56:04+00:00",
+    "source_table": "githubarchive.month.202603"
+  },
+  {
+    "year": 2026,
+    "period": "202604",
+    "job_id": "observatory_hourly_202604_20260805235604",
+    "query_sha256": "4ea65f866358dd9dddf1d099b4231ce266e01c48797d79a2d4a1baed3ea01926",
+    "rows": 720,
+    "bytes_billed": 7025459200,
+    "artifact": "ecosystem_hourly_202604.csv",
+    "exported_at": "2026-08-05T23:56:18+00:00",
+    "source_table": "githubarchive.month.202604"
+  },
+  {
+    "year": 2026,
+    "period": "202605",
+    "job_id": "observatory_hourly_202605_20260805235618",
+    "query_sha256": "588a885c89fedf635c748d6eeb379cbc389fa214014ec86ec9173cd71a2153cf",
+    "rows": 744,
+    "bytes_billed": 7213154304,
+    "artifact": "ecosystem_hourly_202605.csv",
+    "exported_at": "2026-08-05T23:56:33+00:00",
+    "source_table": "githubarchive.month.202605"
+  },
+  {
+    "year": 2026,
+    "period": "202606",
+    "job_id": "observatory_hourly_202606_20260805235633",
+    "query_sha256": "9cd526c7d0ed9f8caa717a1f88ac8510cd810d922f11cf7d215335fdb33f12aa",
+    "rows": 720,
+    "bytes_billed": 7140802560,
+    "artifact": "ecosystem_hourly_202606.csv",
+    "exported_at": "2026-08-05T23:56:51+00:00",
+    "source_table": "githubarchive.month.202606"
+  },
+  {
+    "year": 2026,
+    "period": "202607",
+    "job_id": "observatory_hourly_202607_20260805235651",
+    "query_sha256": "e6d711eecbc37a8378d78a46f106fea0f651017be9f61df339e06bb669063cb8",
+    "rows": 743,
+    "bytes_billed": 7659847680,
+    "artifact": "ecosystem_hourly_202607.csv",
+    "exported_at": "2026-08-05T23:57:07+00:00",
+    "source_table": "githubarchive.month.202607"
   }
 ]
